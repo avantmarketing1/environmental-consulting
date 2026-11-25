@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Field To Forest Environmental Consulting — Lismore &amp; Northern Rivers OSSM Reports</title>
+  <meta name="description" content="Fast-track Lismore City Council Section 68 On-Site Sewage Management (OSSM) reports, land capability assessments, and instant NSW Lot/DP spatial pre-checks by Field To Forest." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="/consulting/styles/ftf.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container inner">
+      <a class="brand-lockup" href="/">
+        <span class="brand-mark">FF</span>
+        <span>
+          <span class="brand-title">Field To Forest</span>
+          <span class="brand-sub">Environmental Consulting · Northern Rivers NSW</span>
+        </span>
+      </a>
+      <nav class="nav-links">
+        <a href="https://fieldtoforestfarm.com/">Farm &amp; Regen Hub</a>
+        <a href="#precheck">Free Lot/DP Pre-Check</a>
+        <a href="#services">Services</a>
+        <a class="btn btn-ghost-light btn-sm" href="#quote">Request Quote &rarr;</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <span class="badge badge-warn" style="background: rgba(254, 243, 199, 0.16); color: #fde68a; border: 1px solid rgba(253, 230, 138, 0.3);">
+        Lismore City Council &amp; Northern Rivers NSW
+      </span>
+      <h1>Council-Ready OSSM Reports in Days, Not Months.</h1>
+      <p class="lead">
+        Traditional Northern Rivers environmental consultancies quote 4–6 weeks because they assemble GIS maps,
+        spreadsheets, and Word templates by hand. <strong>Field To Forest</strong> pairs on-site soil science with
+        deterministic Lismore City Council wastewater modelling to deliver clean, zero-RFI Section 68 reports fast.
+      </p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <a class="btn btn-accent" href="#precheck">Run Free Instant Lot/DP Pre-Check</a>
+        <a class="btn btn-ghost-light" href="#quote">Request a Fixed-Fee Quote</a>
+      </div>
+      <div class="grid-4" style="margin-top:36px;">
+        <div class="kpi" style="background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.16);">
+          <div class="kpi-label" style="color:#b7d7c8;">Turnaround Target</div>
+          <div class="kpi-value" style="color:#fff;">3–5 Days</div>
+          <div class="kpi-sub" style="color:#cce2d7;">From site inspection to lodgement</div>
+        </div>
+        <div class="kpi" style="background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.16);">
+          <div class="kpi-label" style="color:#b7d7c8;">Council Model Parity</div>
+          <div class="kpi-value" style="color:#fff;">7,670 Days</div>
+          <div class="kpi-sub" style="color:#cce2d7;">Exact LCC Alstonville daily water balance</div>
+        </div>
+        <div class="kpi" style="background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.16);">
+          <div class="kpi-label" style="color:#b7d7c8;">Spatial Verification</div>
+          <div class="kpi-value" style="color:#fff;">Live NSW GIS</div>
+          <div class="kpi-sub" style="color:#cce2d7;">GDA2020 MGA56 buffers &amp; overlays</div>
+        </div>
+        <div class="kpi" style="background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.16);">
+          <div class="kpi-label" style="color:#b7d7c8;">Engineering Plans</div>
+          <div class="kpi-value" style="color:#fff;">CAD + GIS</div>
+          <div class="kpi-sub" style="color:#cce2d7;">Scaled DXF &amp; contour maps included</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FREE INSTANT LOT/DP PRE-CHECK LEAD MAGNET -->
+  <section id="precheck" class="container" style="margin-top: -28px; position: relative; z-index: 10;">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+        <div>
+          <span class="badge badge-info">Live NSW Spatial Services + Planning Portal</span>
+          <h2 style="margin:6px 0 4px;">Free Instant Lismore Lot/DP Constraints Pre-Check</h2>
+          <p style="margin:0; color:var(--muted); font-size:0.92rem;">
+            Check zoning, parcel area, mapped drainage lines, flood, bushfire, Acid Sulfate Soils, and Rous Water drinking catchment triggers before you lodge.
+          </p>
+        </div>
+      </div>
+
+      <form id="precheckForm" style="display:grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap:12px; align-items:end;">
+        <div class="field" style="margin:0;">
+          <label for="lotInput">Lot Number</label>
+          <input id="lotInput" placeholder="e.g. 12" required />
+        </div>
+        <div class="field" style="margin:0;">
+          <label for="planInput">Deposited / Strata Plan</label>
+          <input id="planInput" placeholder="e.g. DP123456" required />
+        </div>
+        <div class="field" style="margin:0;">
+          <label for="secInput">Section (Optional)</label>
+          <input id="secInput" placeholder="Leave blank if none" />
+        </div>
+        <button id="runPrecheckBtn" type="submit" class="btn btn-primary" style="height:40px;">Check Property</button>
+      </form>
+
+      <div id="precheckStatus" style="margin-top:12px; font-size:0.88rem; color:var(--muted);"></div>
+
+      <div id="precheckResults" style="display:none; margin-top:20px;">
+        <div class="grid-2">
+          <div>
+            <div id="precheckMap" class="map-box"></div>
+            <div style="font-size:0.78rem; color:var(--muted); margin-top:6px;">
+              Red: Subject Lot · Grey: Adjoining Cadastre · Blue: Mapped NSW Watercourses / Drainage Lines (GDA2020)
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="grid-2" style="gap:10px;">
+              <div class="kpi">
+                <div class="kpi-label">Parcel ID &amp; Area</div>
+                <div class="kpi-value" id="resArea">—</div>
+                <div class="kpi-sub" id="resLotId">—</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">LEP Land Zoning</div>
+                <div class="kpi-value" id="resZoning" style="font-size:1.1rem;">—</div>
+                <div class="kpi-sub" id="resMinLot">—</div>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap;" id="resBadges"></div>
+
+            <div style="background:var(--forest-50); border:1px solid var(--border); border-radius:10px; padding:12px;">
+              <div style="font-weight:700; font-size:0.84rem; color:var(--forest-900); margin-bottom:6px;">
+                Lismore OSSM Pre-Site Flags
+              </div>
+              <ul id="resFlags" style="margin:0; padding-left:18px; font-size:0.86rem;"></ul>
+            </div>
+
+            <div style="margin-top:auto;">
+              <a class="btn btn-accent" href="#quote" style="width:100%;">Request Fixed-Fee Section 68 OSSM Quote for This Lot &darr;</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section id="services" class="container" style="margin-top:48px;">
+    <h2 style="font-size:1.9rem; margin-bottom:8px;">High-Turnaround Compliance Reports</h2>
+    <p style="color:var(--muted); margin-top:0; max-width:680px;">
+      Built specifically for Northern Rivers homeowners, builders, multiple occupancies (MOs), tiny homes, secondary dwellings, and rural subdivisions.
+    </p>
+    <div class="grid-3" style="margin-top:20px;">
+      <div class="card">
+        <span class="badge badge-pass">Flagship Service</span>
+        <h3 style="margin:10px 0 6px;">Section 68 OSSM &amp; Wastewater Reports</h3>
+        <p style="font-size:0.9rem; color:var(--muted);">
+          Full Lismore City Council Section 68 design reports: soil borehole assessment, exact LCC daily water &amp; nutrient model (OSmodel300614), Headley &amp; Davidson reed bed sizing, ETA bed or SDI design, scaled CAD &amp; GIS plans, and O&amp;M manuals.
+        </p>
+      </div>
+      <div class="card">
+        <span class="badge badge-info">Rural &amp; Multiple Occupancy</span>
+        <h3 style="margin:10px 0 6px;">System Upgrades &amp; Secondary Dwellings</h3>
+        <p style="font-size:0.9rem; color:var(--muted);">
+          Upgrading failing septic systems, pit/composting conversions, greywater reed beds, and Home Improvement Area (HIA) assessments across Nimbin, Dunoon, Jiggi, The Channon, Clunes, and the wider Lismore LGA.
+        </p>
+      </div>
+      <div class="card">
+        <span class="badge badge-warn">Regenerative Land Care</span>
+        <h3 style="margin:10px 0 6px;">Ecological &amp; DA Support Plans</h3>
+        <p style="font-size:0.9rem; color:var(--muted);">
+          Statements of Environmental Effects (SEE), Waste Management Plans, Erosion &amp; Sediment Control Plans, and nutrient-cycling evapotranspiration landscapes integrated with Field To Forest farm principles.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- REQUEST QUOTE (SAVES TO CLOUDFLARE D1) -->
+  <section id="quote" class="container" style="margin-top:48px;">
+    <div class="card">
+      <h2 style="margin-top:0;">Request a Fast-Track OSSM Quote</h2>
+      <p style="color:var(--muted); margin-top:0;">
+        Submit your property details below. If you ran the Lot/DP Pre-Check above, your live NSW GIS findings are attached automatically so we can quote accurately within 24 hours.
+      </p>
+      <form id="quoteForm" class="grid-2">
+        <div class="field">
+          <label for="qName">Your Full Name *</label>
+          <input id="qName" required placeholder="e.g. Sarah Jenkins" />
+        </div>
+        <div class="field">
+          <label for="qEmail">Email Address *</label>
+          <input id="qEmail" type="email" required placeholder="you@example.com" />
+        </div>
+        <div class="field">
+          <label for="qPhone">Phone Number</label>
+          <input id="qPhone" placeholder="04xx xxx xxx" />
+        </div>
+        <div class="field">
+          <label for="qAddress">Property Street Address</label>
+          <input id="qAddress" placeholder="e.g. 120 Sample Creek Rd, Lismore NSW 2480" />
+        </div>
+        <div class="field">
+          <label for="qLot">Lot Number</label>
+          <input id="qLot" placeholder="e.g. 12" />
+        </div>
+        <div class="field">
+          <label for="qPlan">DP / SP Number</label>
+          <input id="qPlan" placeholder="e.g. DP123456" />
+        </div>
+        <div class="field">
+          <label for="qService">Report Type</label>
+          <select id="qService">
+            <option value="ossm_s68">Section 68 OSSM / Wastewater Report (New or Upgrade)</option>
+            <option value="ossm_mo">Multiple Occupancy / Secondary Dwelling OSSM</option>
+            <option value="see">Statement of Environmental Effects (SEE)</option>
+            <option value="erosion_waste">Waste &amp; Erosion/Sediment Control Plan</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="qBeds">Number of Bedrooms</label>
+          <input id="qBeds" type="number" min="1" max="10" value="3" />
+        </div>
+        <div class="field" style="grid-column: 1 / -1;">
+          <label for="qNotes">Project Scope / Notes (e.g. composting toilet + greywater, reed bed preference, DA reference)</label>
+          <textarea id="qNotes" rows="3" placeholder="Tell us about your build, timeline, or council RFI..."></textarea>
+        </div>
+        <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <button id="quoteSubmitBtn" type="submit" class="btn btn-primary">Submit Quote Request</button>
+          <span id="quoteStatus" style="font-size:0.9rem;"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="container" style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:16px;">
+      <div>
+        <strong style="color:#fff;">Field To Forest</strong> — Regenerative Farming, Farm Tools &amp; Environmental Consulting<br />
+        Lismore &amp; Northern Rivers, NSW · <a href="https://fieldtoforestfarm.com">fieldtoforestfarm.com</a>
+      </div>
+      <div style="display:flex; gap:16px; align-items:center;">
+        <a href="/consulting/">Consulting Home</a>
+        <a href="#services">Services</a>
+        <a href="#quote">Request Quote</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    let map = null;
+    let layerGroup = null;
+    let lastPrecheck = null;
+
+    function initMap() {
+      if (map) return;
+      map = L.map("precheckMap").setView([-28.58, 153.18], 13);
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        attribution: "Imagery &copy; Esri | Cadastre &copy; NSW Spatial Services",
+        maxZoom: 19,
+      }).addTo(map);
+      layerGroup = L.layerGroup().addTo(map);
+    }
+
+    async function runPrecheck(lot, plan, sec) {
+      const statusEl = document.getElementById("precheckStatus");
+      const btn = document.getElementById("runPrecheckBtn");
+      btn.disabled = true;
+      statusEl.textContent = `Querying live NSW Spatial Services & NSW Planning Portal for Lot ${lot} ${plan}...`;
+
+      try {
+        const qs = new URLSearchParams({ lot, plan });
+        if (sec) qs.set("section", sec);
+        const resp = await fetch(`/consulting/api/spatial/precheck?${qs.toString()}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || data.error || "Lookup failed");
+
+        lastPrecheck = data;
+        document.getElementById("qLot").value = lot;
+        document.getElementById("qPlan").value = plan.toUpperCase();
+
+        if (!data.fetched_live) {
+          statusEl.innerHTML = `<span style="color:var(--fail-fg); font-weight:600;">${(data.warnings || ["Lot not found"]).join(" ")}</span>`;
+          document.getElementById("precheckResults").style.display = "none";
+          return;
+        }
+
+        statusEl.innerHTML = `<span style="color:var(--pass-fg); font-weight:600;">Live NSW GIS verified (${data.crs_name})</span>`;
+        document.getElementById("precheckResults").style.display = "block";
+
+        document.getElementById("resArea").textContent = data.parcel_area_ha ? `${data.parcel_area_ha.toFixed(2)} ha` : "—";
+        document.getElementById("resLotId").textContent = `${data.lot_id_string} (${Math.round(data.parcel_area_m2 || 0).toLocaleString()} m²)`;
+        document.getElementById("resZoning").textContent = data.land_zoning.length ? data.land_zoning.join(", ") : "Verify LEP";
+        document.getElementById("resMinLot").textContent = data.min_lot_size.length ? `Min Lot Size: ${data.min_lot_size.join(", ")}` : `MGA56: E ${Math.round(data.centroid_easting_mga56)}, N ${Math.round(data.centroid_northing_mga56)}`;
+
+        const badges = [];
+        badges.push(data.drinking_water_catchment
+          ? `<span class="badge badge-warn">Rous Water Catchment: YES</span>`
+          : `<span class="badge badge-pass">Rous Water Catchment: No</span>`);
+        badges.push(data.flood_planning
+          ? `<span class="badge badge-warn">Flood Planning: YES</span>`
+          : `<span class="badge badge-pass">Flood Planning: No</span>`);
+        badges.push(data.acid_sulfate_soils.length
+          ? `<span class="badge badge-warn">ASS: ${data.acid_sulfate_soils[0]}</span>`
+          : `<span class="badge badge-pass">Acid Sulfate Soils: None</span>`);
+        badges.push(data.bushfire_prone_land.length
+          ? `<span class="badge badge-warn">Bushfire Prone</span>`
+          : `<span class="badge badge-pass">Bushfire: Not Mapped</span>`);
+        if (data.nearest_watercourse_m !== null) {
+          badges.push(`<span class="badge ${data.nearest_watercourse_m < 100 ? 'badge-warn' : 'badge-info'}">Watercourse: ${data.nearest_watercourse_m === 0 ? 'Crosses Lot' : data.nearest_watercourse_m + ' m'}</span>`);
+        }
+        document.getElementById("resBadges").innerHTML = badges.join("");
+
+        document.getElementById("resFlags").innerHTML = (data.pre_site_flags || [])
+          .map((f) => `<li style="margin-bottom:4px;">${f}</li>`)
+          .join("");
+
+        initMap();
+        layerGroup.clearLayers();
+        if (data.neighbour_parcels_geojson?.length) {
+          L.geoJSON(data.neighbour_parcels_geojson, { style: { color: "#cbd5e1", weight: 1, fillOpacity: 0.05 } }).addTo(layerGroup);
+        }
+        if (data.watercourses_geojson?.length) {
+          L.geoJSON(data.watercourses_geojson, { style: { color: "#38bdf8", weight: 2.2 } }).addTo(layerGroup);
+        }
+        if (data.parcel_geojson) {
+          const subject = L.geoJSON(data.parcel_geojson, {
+            style: { color: "#ef4444", weight: 2.8, fillColor: "#f87171", fillOpacity: 0.25 },
+          }).addTo(layerGroup);
+          setTimeout(() => {
+            map.invalidateSize();
+            map.fitBounds(subject.getBounds().pad(0.25));
+          }, 80);
+        }
+      } catch (err) {
+        statusEl.innerHTML = `<span style="color:var(--fail-fg);">Error: ${err.message}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("precheckForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      runPrecheck(
+        document.getElementById("lotInput").value.trim(),
+        document.getElementById("planInput").value.trim(),
+        document.getElementById("secInput").value.trim(),
+      );
+    });
+
+    document.getElementById("quoteForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("quoteStatus");
+      const btn = document.getElementById("quoteSubmitBtn");
+      btn.disabled = true;
+      status.textContent = "Submitting quote request...";
+      try {
+        const resp = await fetch("/consulting/api/enquiries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: document.getElementById("qName").value.trim(),
+            email: document.getElementById("qEmail").value.trim(),
+            phone: document.getElementById("qPhone").value.trim(),
+            site_address: document.getElementById("qAddress").value.trim(),
+            lot_number: document.getElementById("qLot").value.trim(),
+            plan_label: document.getElementById("qPlan").value.trim(),
+            service_type: document.getElementById("qService").value,
+            bedrooms: Number(document.getElementById("qBeds").value || 3),
+            notes: document.getElementById("qNotes").value.trim(),
+            spatial_precheck: lastPrecheck ? {
+              lot_id_string: lastPrecheck.lot_id_string,
+              parcel_area_ha: lastPrecheck.parcel_area_ha,
+              land_zoning: lastPrecheck.land_zoning,
+              pre_site_flags: lastPrecheck.pre_site_flags,
+            } : null,
+          }),
+        });
+        const out = await resp.json();
+        if (!resp.ok) throw new Error(out.error || "Failed to submit");
+        status.innerHTML = `<span style="color:var(--pass-fg); font-weight:700;">Thank you! Quote request saved (Ref: ${out.id.slice(0,8).toUpperCase()}). We will reply within 24 hours.</span>`;
+        e.target.reset();
+      } catch (err) {
+        status.innerHTML = `<span style="color:var(--fail-fg);">Error: ${err.message}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

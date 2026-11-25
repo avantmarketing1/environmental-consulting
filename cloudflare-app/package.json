@@ -1,0 +1,23 @@
+{
+  "name": "fieldtoforest-consulting",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-py": "node scripts/sync-python-engine.mjs",
+    "dev": "npm run sync-py && wrangler dev --port 8787 --ip 127.0.0.1",
+    "build": "npm run sync-py && tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply fieldtoforest-consulting-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply fieldtoforest-consulting-db --remote",
+    "deploy": "npm run sync-py && wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.166.0"
+  }
+}

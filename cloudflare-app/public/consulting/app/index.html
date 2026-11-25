@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Field To Forest Studio — Lismore OSSM &amp; SEE Compliance Workbench</title>
+  <link rel="manifest" href="/consulting/manifest.webmanifest" />
+  <meta name="theme-color" content="#102c21" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=10" />
+  <script>
+    // Apply saved theme immediately before paint to prevent light/dark flash
+    (function () {
+      const saved = localStorage.getItem("ftf_theme");
+      const theme = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+</head>
+<body>
+  <!-- TOP COMMAND BAR -->
+  <header class="ws-topbar">
+    <div class="ws-topbar-inner">
+      <a class="brand-lockup" href="/consulting/">
+        <span class="brand-mark">FF</span>
+        <span>
+          <span class="brand-title">Field To Forest · Compliance Studio</span>
+          <span class="brand-sub">Lismore Shire · Section 68 OSSM &amp; DA SEE</span>
+        </span>
+      </a>
+
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span id="netBadge" class="badge badge-pass">Online</span>
+        <span id="pyBadge" class="badge badge-info">Pyodide: Standby</span>
+        <button id="btnThemeToggle" type="button" class="btn btn-ghost-light btn-sm" title="Switch Light / Dark Mode">🌙 Dark</button>
+        <button id="btnOpenNewJob" type="button" class="btn btn-ghost-light btn-sm">+ New Job</button>
+        <button id="btnSaveJob" type="button" class="btn btn-accent btn-sm">Save Job to D1</button>
+        <button id="btnSignOut" type="button" class="btn btn-ghost-light btn-sm" style="display:none;" title="Sign out of Consultant Studio">Sign Out</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- WORKSPACE SHELL (SIDEBAR + MAIN CANVAS) -->
+  <div class="ws-shell">
+    <!-- LEFT SIDEBAR -->
+    <aside class="ws-sidebar">
+      <div class="ws-nav-group">
+        <div class="ws-nav-label">Workspace</div>
+        <button class="ws-nav-item active" data-panel="panel-dashboard">
+          <span class="ws-nav-left"><span class="ws-step-dot">⌂</span> Dashboard &amp; Leads</span>
+          <span class="ws-nav-pill" id="navJobsCount">D1</span>
+        </button>
+      </div>
+
+      <!-- Active Deliverable Scope Toggle -->
+      <div class="scope-card">
+        <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:800;">
+          Consulting Scope on This Job
+        </div>
+        <div class="scope-toggle-row">
+          <button type="button" id="scopeBtnOssm" class="scope-pill on" title="Include Section 68 OSSM workflow">✓ OSSM (s68)</button>
+          <button type="button" id="scopeBtnSee" class="scope-pill on" title="Include DA Statement of Environmental Effects workflow">✓ SEE (DA)</button>
+        </div>
+      </div>
+
+      <!-- SHARED PROJECT HUB (Entered once, read by BOTH OSSM & SEE!) -->
+      <div class="ws-nav-group">
+        <div class="ws-nav-label"><span>Shared Project Hub</span><span style="font-weight:600; opacity:0.8;">All Docs</span></div>
+        <button class="ws-nav-item" data-panel="panel-hub" id="navHub">
+          <span class="ws-nav-left"><span class="ws-step-dot">1</span> Brief, Vault &amp; GIS</span>
+          <span class="ws-nav-pill" id="navGisBadge">GIS</span>
+        </button>
+        <button class="ws-nav-item" data-panel="panel-field" id="navField">
+          <span class="ws-nav-left"><span class="ws-step-dot">2</span> Field Notes &amp; Photos</span>
+          <span class="ws-nav-pill" id="navPhotoBadge">0</span>
+        </button>
+      </div>
+
+      <!-- OSSM WORKFLOW -->
+      <div class="ws-nav-group" id="navGroupOssm">
+        <div class="ws-nav-label"><span>Section 68 OSSM Flow</span><span style="color:var(--ochre-600);">Wastewater</span></div>
+        <button class="ws-nav-item" data-panel="panel-ossm-soil" id="navOssmSoil">
+          <span class="ws-nav-left"><span class="ws-step-dot">3</span> Site Eval &amp; Boreholes</span>
+          <span class="ws-nav-pill" id="navBhBadge">2 BH</span>
+        </button>
+        <button class="ws-nav-item" data-panel="panel-ossm-model" id="navOssmModel">
+          <span class="ws-nav-left"><span class="ws-step-dot">4</span> Sizing, CAD &amp; Audit</span>
+          <span class="ws-nav-pill" id="navLaaBadge">—</span>
+        </button>
+        <button class="ws-nav-item" data-panel="panel-ossm-export" id="navOssmExport">
+          <span class="ws-nav-left"><span class="ws-step-dot">5</span> Draft &amp; Export OSSM</span>
+          <span class="ws-nav-pill">.DOCX</span>
+        </button>
+      </div>
+
+      <!-- SEE WORKFLOW -->
+      <div class="ws-nav-group" id="navGroupSee">
+        <div class="ws-nav-label"><span>Lismore DA SEE Flow</span><span style="color:var(--forest-700);">LEP / DCP</span></div>
+        <button class="ws-nav-item" data-panel="panel-see-plan" id="navSeePlan">
+          <span class="ws-nav-left"><span class="ws-step-dot">3</span> DA Proposal &amp; LEP</span>
+          <span class="ws-nav-pill" id="navSeeZoneBadge">LEP</span>
+        </button>
+        <button class="ws-nav-item" data-panel="panel-see-export" id="navSeeExport">
+          <span class="ws-nav-left"><span class="ws-step-dot">4</span> Draft &amp; Export SEE</span>
+          <span class="ws-nav-pill">.DOCX</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT CANVAS -->
+    <main class="ws-main">
+      <!-- ACTIVE JOB RIBBON -->
+      <div class="ws-ribbon">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:800;">Active Job</span>
+            <span id="ribbonScopeBadges" style="display:inline-flex; gap:5px;"></span>
+          </div>
+          <div style="font-weight:800; font-size:1.05rem; color:var(--heading); margin-top:2px;" id="activeJobHeader">New Lismore Project</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;" id="ribbonKpis">
+          <div class="kpi" style="padding:6px 12px;" id="kpiFlowWrap">
+            <div class="kpi-label">Design Flow</div>
+            <div style="font-weight:800; font-size:0.95rem;" id="ribbonFlow">—</div>
+          </div>
+          <div class="kpi" style="padding:6px 12px;" id="kpiLaaWrap">
+            <div class="kpi-label">Required LAA</div>
+            <div style="font-weight:800; font-size:0.95rem;" id="ribbonLaa">—</div>
+          </div>
+          <div class="kpi" style="padding:6px 12px;" id="kpiRbWrap">
+            <div class="kpi-label">Reed Bed</div>
+            <div style="font-weight:800; font-size:0.95rem;" id="ribbonRb">—</div>
+          </div>
+          <div class="kpi" style="padding:6px 12px;" id="kpiZoneWrap">
+            <div class="kpi-label">LEP Zone</div>
+            <div style="font-weight:800; font-size:0.95rem;" id="ribbonZone">Fetch GIS</div>
+          </div>
+          <div id="ribbonStatus"></div>
+        </div>
+      </div>
+
+      <!-- ================================================================
+           PANEL 0: DASHBOARD (D1 JOBS & INCOMING LEADS)
+           ================================================================ -->
+      <section id="panel-dashboard" class="tab-panel active">
+        <div class="grid-2">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h2 style="margin:0; font-size:1.2rem;">Active Projects (Cloudflare D1)</h2>
+              <button id="btnNewJobDash" type="button" class="btn btn-primary btn-sm">+ Create New Job</button>
+            </div>
+            <div id="jobsList" style="font-size:0.86rem; color:var(--muted);">Loading projects...</div>
+          </div>
+
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h2 style="margin:0; font-size:1.2rem;">Incoming Quote Requests (/consulting/)</h2>
+              <button id="btnRefreshDash" type="button" class="btn btn-outline btn-sm">Refresh</button>
+            </div>
+            <div id="enquiriesList" style="font-size:0.86rem; color:var(--muted);">Loading enquiries...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 1: SHARED PROJECT HUB (BRIEF, DOCUMENT VAULT, AI & GIS)
+           ================================================================ -->
+      <section id="panel-hub" class="tab-panel">
+        <!-- Project Brief & Unified Evidence Vault -->
+        <div class="card" style="margin-bottom:18px; border-left:4px solid var(--forest-700);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <span class="badge badge-info" id="aiStatusBadge">Gemini AI: Checking...</span>
+              <h2 style="margin:6px 0 2px; font-size:1.2rem;">Project Brief &amp; Shared Evidence Vault</h2>
+              <p style="margin:0; font-size:0.83rem; color:var(--muted);">
+                Upload any PDF architectural plans, existing septic approvals, survey maps, emails, or council letters once — <strong>both the OSSM and SEE workflows read from this shared vault</strong>.
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <label style="font-size:0.76rem; font-weight:700; color:var(--muted);">Model:</label>
+              <input id="aiModelInput" value="gemini-4-hydrogen" style="width:162px; padding:5px 8px; border:1px solid var(--border); border-radius:7px; font-size:0.8rem; font-family:monospace; background:var(--surface-input); color:var(--ink);" />
+              <input id="aiSessionKeyInput" type="password" placeholder="Optional session Gemini API key" style="width:195px; padding:5px 8px; border:1px solid var(--border); border-radius:7px; font-size:0.8rem; background:var(--surface-input); color:var(--ink);" title="Only needed if GEMINI_API_KEY is not set in .dev.vars or Worker secrets" />
+            </div>
+          </div>
+
+          <div class="grid-2" style="gap:14px;">
+            <div class="field" style="margin:0;">
+              <label>Project Brief &amp; Unstructured Notes (Client Email, Scope, Constraints, Staging)</label>
+              <textarea id="aiNotesInput" rows="4" placeholder="Describe the project in plain English — e.g. '3-BR dwelling + 3x 1-BR agritourism cabins + 40m2 farm-gate kitchen needing a grease trap on ridge above creek. Need both Section 68 OSSM and DA SEE for Lismore Council.'"></textarea>
+            </div>
+            <div>
+              <label style="display:block; font-size:0.8rem; font-weight:600; color:var(--muted); margin-bottom:5px;">Shared Project Documents (PDF Plans, SEEs, Maps, Audio, Notes)</label>
+              <div class="vault-dropzone" id="vaultDropzone">
+                <div style="font-weight:700; font-size:0.88rem; color:var(--heading);">Drop PDFs, Plans, Maps or Images Here</div>
+                <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">or click to browse (multi-file · readable by OSSM &amp; SEE workflows)</div>
+                <input id="aiFilesInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.csv,.mp3,.wav,.m4a,.webm" style="display:none;" />
+              </div>
+              <div id="vaultFilesChips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+            <button id="btnAiExtract" type="button" class="btn btn-primary btn-sm">✨ Extract Project Data with Gemini (Pre-fills OSSM &amp; SEE)</button>
+            <button id="btnAiApply" type="button" class="btn btn-accent btn-sm" style="display:none;">Apply Extracted Data to Project</button>
+            <span id="aiExtractStatus" style="font-size:0.81rem; color:var(--muted);"></span>
+          </div>
+          <div id="aiExtractPreview" style="display:none; margin-top:12px; padding:12px; border-radius:9px; background:var(--surface-alt); border:1px solid var(--border); font-size:0.83rem;"></div>
+        </div>
+
+        <!-- Property Details + Live NSW GIS Map -->
+        <div class="grid-2">
+          <div class="card">
+            <h2 style="margin-top:0; font-size:1.18rem;">Property &amp; Applicant Details</h2>
+            <div class="grid-2" style="gap:10px;">
+              <div class="field"><label>Project Ref</label><input id="fProjectRef" /></div>
+              <div class="field"><label>Assessment Date</label><input id="fDate" type="date" /></div>
+              <div class="field"><label>Applicant / Owner Name</label><input id="fApplicant" /></div>
+              <div class="field"><label>Allotment Area (m²)</label><input id="fBlockM2" type="number" min="100" step="100" /></div>
+              <div class="field" style="grid-column:1/-1;"><label>Site Street Address</label><input id="fAddress" /></div>
+              <div class="field"><label>Lot Number</label><input id="fLot" placeholder="12" /></div>
+              <div class="field"><label>Plan Label (DP/SP)</label><input id="fPlan" placeholder="DP123456" /></div>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap;">
+              <button id="btnRunGis" type="button" class="btn btn-primary">Fetch Live NSW Cadastre &amp; Overlays</button>
+              <span id="gisStatus" style="font-size:0.83rem; color:var(--muted);"></span>
+            </div>
+
+            <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;" />
+            <h3 style="margin:0 0 8px; font-size:0.98rem;">Live NSW Statutory Overlays (Shared by OSSM &amp; SEE)</h3>
+            <div id="gisOverlaysBox" style="font-size:0.84rem; color:var(--muted);">
+              Click <strong>Fetch Live NSW Cadastre &amp; Overlays</strong> to pull Lismore LEP 2012 Zoning, Minimum Lot Size, Flood Planning, Bushfire Prone Land, Acid Sulfate Soils, Watercourses, Contours, and Rous Water Catchment.
+            </div>
+          </div>
+
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h2 style="margin:0; font-size:1.18rem;">Interactive Satellite &amp; Pin Map</h2>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <label style="font-size:0.78rem; font-weight:600; color:var(--muted);">Drop Pin:</label>
+                <select id="pinTypeSelect" style="padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:0.8rem; background:var(--surface-input); color:var(--ink);">
+                  <option value="">Off (Pan/Zoom)</option>
+                  <option value="dwelling">Dwelling / Building</option>
+                  <option value="septic_tank">Septic Tank</option>
+                  <option value="reed_bed">Reed Bed</option>
+                  <option value="eta_bed">ETA Bed / LAA</option>
+                  <option value="reserve_laa">Reserve LAA</option>
+                  <option value="borehole">Soil Borehole</option>
+                </select>
+              </div>
+            </div>
+            <div id="wbMap" class="map-box"></div>
+            <div id="pinsList" style="margin-top:10px; font-size:0.8rem; color:var(--muted);">
+              Select a feature in 'Drop Pin' and click the satellite map to log GDA2020 coordinates.
+            </div>
+          </div>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-dashboard">← Back to Dashboard</button>
+          <button type="button" class="btn btn-primary" data-goto="panel-field">Next: Field Notes &amp; Photos →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 2: SHARED FIELD CAPTURE, VOICE MEMOS & PHOTOS
+           ================================================================ -->
+      <section id="panel-field" class="tab-panel">
+        <div class="grid-2">
+          <div class="card">
+            <h2 style="margin-top:0; font-size:1.2rem;">Voice-First Field Capture &amp; Site Observations</h2>
+            <p style="font-size:0.84rem; color:var(--muted); margin-top:0;">
+              Works 100% offline in the paddock. Dictate site observations or record audio memos — stored in your Shared Project Vault and available to both OSSM and SEE workflows.
+            </p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+              <button id="btnDictate" type="button" class="btn btn-primary btn-sm">🎙 Start Voice Dictation</button>
+              <button id="btnRecordAudio" type="button" class="btn btn-outline btn-sm">● Record Audio Memo</button>
+              <span id="voiceStatus" style="font-size:0.82rem; color:var(--muted); align-self:center;"></span>
+            </div>
+            <div class="field">
+              <label>Field Inspection Notes &amp; Voice Transcript</label>
+              <textarea id="fVoiceTranscript" rows="6" placeholder="Spoken or typed field observations (vegetation, drainage, access sightlines, existing structures, soil feel)..."></textarea>
+            </div>
+            <div class="field">
+              <label>Existing System / Site History Notes</label>
+              <textarea id="fExistingNotes" rows="3" placeholder="Existing septic tank condition, prior DAs, farm buildings, cattle dip check..."></textarea>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin-top:0; font-size:1.2rem;">Geotagged Site Photographs (Auto-Embeds in OSSM &amp; SEE)</h2>
+            <p style="font-size:0.84rem; color:var(--muted); margin-top:0;">
+              Capture from phone camera or upload photos. Every attached photo embeds cleanly with its caption into your compiled OSSM and/or SEE Word documents.
+            </p>
+            <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+              <div class="field" style="flex:1; margin:0; min-width:170px;">
+                <label>Capture / Choose Photo</label>
+                <input id="photoFileInput" type="file" accept="image/*" capture="environment" />
+              </div>
+              <div class="field" style="flex:1; margin:0; min-width:170px;">
+                <label>Photo Caption</label>
+                <input id="photoCaptionInput" placeholder="e.g. Pegged ETA bed looking NE" />
+              </div>
+              <button id="btnUploadPhoto" type="button" class="btn btn-accent btn-sm" style="height:39px;">Attach Photo</button>
+            </div>
+            <div id="localPhotosBox" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;"></div>
+            <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;" />
+            <div id="r2FilesList" style="font-size:0.82rem; color:var(--muted);">No files uploaded to Cloudflare R2 for this job yet.</div>
+          </div>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-hub">← Project Brief, Vault &amp; GIS</button>
+          <button type="button" class="btn btn-primary" id="btnNextFromField">Continue to Deliverable Workflow →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 3 (OSSM): SITE EVALUATION & BOREHOLE LOGS
+           ================================================================ -->
+      <section id="panel-ossm-soil" class="tab-panel">
+        <div class="grid-2">
+          <div class="card">
+            <h2 style="margin-top:0; font-size:1.2rem;">Site Evaluation (LCC Strategy Appendix E — Table 8)</h2>
+            <div class="grid-2" style="gap:10px;">
+              <div class="field"><label>Slope (%)</label><input id="fSlope" type="number" step="0.5" min="0" max="60" /></div>
+              <div class="field"><label>Aspect</label><input id="fAspect" placeholder="e.g. North-East" /></div>
+              <div class="field">
+                <label>Sun / Wind Exposure</label>
+                <select id="fExposure">
+                  <option value="high">High (Open Sun &amp; Wind)</option>
+                  <option value="medium">Medium</option>
+                  <option value="low_sheltered">Low / Sheltered</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Landform</label>
+                <select id="fLandform">
+                  <option value="divergent">Divergent (Hill Crest / Ridge)</option>
+                  <option value="linear_planar">Linear Planar</option>
+                  <option value="convergent">Convergent (Drainage Concentrating)</option>
+                </select>
+              </div>
+              <div class="field"><label>Depth to Water Table / Bedrock (m)</label><input id="fWtDepth" type="number" step="0.1" min="0.2" max="20" /></div>
+              <div class="field"><label>Buffer Distance to Gully (m)</label><input id="fDistGully" type="number" min="0" /></div>
+              <div class="field"><label>Distance to Watercourse (m)</label><input id="fDistWater" type="number" min="0" /></div>
+              <div class="field"><label>Distance to Boundary (m)</label><input id="fDistBound" type="number" min="0" /></div>
+              <div class="field"><label>Septic Tank to Dwelling (m)</label><input id="fDistSeptic" type="number" step="0.5" min="0" /></div>
+              <div class="field">
+                <label>100% Reserve LAA Available?</label>
+                <select id="fReserve"><option value="true">Yes — Nominated on Site Plan</option><option value="false">No</option></select>
+              </div>
+            </div>
+            <div class="field"><label>Upslope Run-on Diversion &amp; Downslope Control</label><input id="fRunOn" /></div>
+          </div>
+
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h2 style="margin:0; font-size:1.2rem;">Borehole Soil Logs (Min. 2 BH ≥ 1000 mm)</h2>
+              <button id="btnAddBorehole" type="button" class="btn btn-outline btn-sm">+ Add Borehole</button>
+            </div>
+            <p style="font-size:0.82rem; color:var(--muted); margin-top:0;">
+              Emerson Aggregate Class 3 or 4 automatically triggers gypsum amelioration (1.0 kg/m²) in both the compliance audit and ETA cross-section.
+            </p>
+            <div id="boreholesContainer"></div>
+          </div>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-field">← Field Notes &amp; Photos</button>
+          <button type="button" class="btn btn-primary" data-goto="panel-ossm-model">Next: Wastewater Sizing, CAD &amp; Audit →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 4 (OSSM): WASTEWATER SIZING, MULTI-USE, CAD & AUDIT
+           ================================================================ -->
+      <section id="panel-ossm-model" class="tab-panel">
+        <div class="grid-2">
+          <div class="card">
+            <h2 style="margin-top:0; font-size:1.2rem;">Lismore CC Wastewater Model (OSmodel300614)</h2>
+            <div class="grid-2" style="gap:10px; margin-bottom:10px;">
+              <div class="field">
+                <label>Development Type</label>
+                <select id="mDevCategory">
+                  <option value="single_dwelling">Single Dwelling (Standard Domestic)</option>
+                  <option value="dual_occupancy">Dual Occupancy / Secondary Dwelling</option>
+                  <option value="agritourism_cabins">Agritourism / Multiple Eco-Cabins</option>
+                  <option value="food_processing_commercial">On-Farm Food Processing / Farm-Gate Café</option>
+                  <option value="mixed_farm_development">Mixed Farm Development (Dwellings + Cabins + Kitchen)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Development Description (Report Scope)</label>
+                <input id="mDevDesc" placeholder="Combined Secondary On-Site Wastewater Treatment and Disposal System" />
+              </div>
+            </div>
+
+            <!-- Composable Multi-Use Sources Builder -->
+            <div class="card-alt" style="margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                <strong style="font-size:0.85rem; color:var(--heading);">Multi-Use / Commercial Wastewater Sources</strong>
+                <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-sm" data-add-src="dwelling">+ Dwelling</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-add-src="secondary_dwelling">+ Secondary</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-add-src="agritourism_cabin">+ Cabins</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-add-src="food_processing_commercial">+ Food / Grease Trap</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-add-src="day_visitors_amenities">+ Day Visitors</button>
+                </div>
+              </div>
+              <div id="sourcesTableBox" style="font-size:0.8rem; color:var(--muted);">
+                Standard single-dwelling mode (using Bedrooms below). Add sources above for Dual Occupancy, Agritourism Cabins, or Food Processing + Grease Arrestor.
+              </div>
+              <div class="grid-3" style="gap:8px; margin-top:10px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.79rem; font-weight:600;">
+                  <input id="mGreaseReq" type="checkbox" style="width:auto;" /> Require Grease Arrestor
+                </label>
+                <div class="field" style="margin:0;"><label style="font-size:0.72rem;">Grease Trap (L, 0=Auto)</label><input id="mGreaseCap" type="number" min="0" step="500" value="0" /></div>
+                <div class="field" style="margin:0;"><label style="font-size:0.72rem;">Surge Tank (L, 0=Auto)</label><input id="mSurgeCap" type="number" min="0" step="500" value="0" /></div>
+              </div>
+            </div>
+
+            <div class="grid-2" style="gap:10px;">
+              <div class="field"><label>Bedrooms (Single Dwelling)</label><input id="mBedrooms" type="number" min="1" max="10" /></div>
+              <div class="field">
+                <label>Water Supply (LCC Table B1)</label>
+                <select id="mWaterSupply">
+                  <option value="roof_full_water_saving">Roof Water + Full WELS 5★ (120 L/p/d)</option>
+                  <option value="roof_standard">Roof Water — Standard (140 L/p/d)</option>
+                  <option value="reticulated_full_water_saving">Reticulated + Full WELS 5★ (150 L/p/d)</option>
+                  <option value="reticulated_standard">Reticulated — Standard (180 L/p/d)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Treatment System</label>
+                <select id="mTreatment">
+                  <option value="secondary_reed_bed">Secondary: Rigid Reed Bed</option>
+                  <option value="secondary_awts">Secondary: AWTS (20% N Removal)</option>
+                  <option value="primary_septic">Primary Only: Septic Tank</option>
+                  <option value="secondary_generic">Secondary: Generic</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Land Application Type</label>
+                <select id="mLaaType">
+                  <option value="eta_beds">ETA Beds (Preferred Passive)</option>
+                  <option value="subsurface_drip_irrigation">Sub-Surface Drip Irrigation (CIDP req.)</option>
+                  <option value="surface_spray_irrigation">Surface Spray Irrigation (CIDP req.)</option>
+                </select>
+              </div>
+              <div class="field"><label>Morand (1994) Soil Unit</label><select id="mMorand"></select></div>
+              <div class="field"><label>Soil Texture (Most Limiting Layer)</label><select id="mSoilTexture"></select></div>
+              <div class="field"><label>Reed Bed Wetted Depth (m)</label><input id="mRbDepth" type="number" step="0.05" min="0.3" max="1.0" /></div>
+              <div class="field"><label>ETA Root Zone (mm)</label><input id="mRootMm" type="number" step="50" min="100" max="450" /></div>
+              <div class="field"><label>ETA Gravel Depth (mm)</label><input id="mGravelMm" type="number" step="50" min="0" max="450" /></div>
+              <div class="field"><label>ETA Bed Width (m)</label><input id="mTrenchW" type="number" step="0.5" min="1.0" max="3.0" /></div>
+            </div>
+
+            <h3 style="margin:14px 0 8px; font-size:0.98rem;">Exact 7,670-Day Alstonville Balance Results</h3>
+            <div class="grid-3" style="gap:10px; margin-bottom:12px;">
+              <div class="kpi"><div class="kpi-label">Hydraulic Area</div><div class="kpi-value" id="outHyd">—</div><div class="kpi-sub" id="outHydSub">—</div></div>
+              <div class="kpi"><div class="kpi-label">Nitrogen Area</div><div class="kpi-value" id="outNit">—</div><div class="kpi-sub" id="outNitSub">—</div></div>
+              <div class="kpi"><div class="kpi-label">Phosphorus Area</div><div class="kpi-value" id="outPhos">—</div><div class="kpi-sub" id="outPhosSub">—</div></div>
+            </div>
+            <div id="modelSummaryTable"></div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:18px;">
+            <div class="card">
+              <h2 style="margin-top:0; font-size:1.18rem;">Live Scaled CAD Layout Preview</h2>
+              <div class="drawing-frame" id="cadSvgBox"></div>
+            </div>
+            <div class="card">
+              <h2 style="margin-top:0; font-size:1.18rem;">Lismore Strategy (2013) Compliance Audit</h2>
+              <div id="departuresBox" style="margin-bottom:12px;"></div>
+              <div style="overflow-x:auto;" id="complianceTableBox"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-ossm-soil">← Site Eval &amp; Boreholes</button>
+          <button type="button" class="btn btn-primary" data-goto="panel-ossm-export">Next: Draft &amp; Export OSSM Package →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 5 (OSSM): DRAFT & EXPORT SECTION 68 PACKAGE
+           ================================================================ -->
+      <section id="panel-ossm-export" class="tab-panel">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:14px;">
+            <div>
+              <span class="badge badge-pass">Section 68 Local Government Act 1993 · Browser Pyodide WASM</span>
+              <h2 style="margin:8px 0 4px;">Draft &amp; Compile Lismore OSSM Package (.DOCX + .DXF)</h2>
+              <p style="margin:0; color:var(--muted); max-width:740px; font-size:0.86rem;">
+                Compiles your full 12-section Section 68 report with GDA2020 GIS Site Map, CAD Plan, Treatment Train, Engineering Cross-Sections, Site Photos, and companion 12-layer AutoCAD <code>.dxf</code>.
+              </p>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              <button id="btnCompilePackage" type="button" class="btn btn-accent">Compile .DOCX + .DXF Package</button>
+              <button id="btnArchiveR2" type="button" class="btn btn-primary" disabled>Save Package to R2</button>
+            </div>
+          </div>
+
+          <div id="exportLog" class="console-box" style="margin-top:14px;">
+            Ready. Optionally draft custom Gemini prose below, inspect your live drawing previews, and click "Compile .DOCX + .DXF Package".
+          </div>
+
+          <div id="exportDownloads" style="display:none; margin-top:16px;" class="grid-3">
+            <div class="card-alt">
+              <div class="kpi-label">Section 68 Word Report</div>
+              <h3 style="margin:6px 0;">Council OSSM Report (.docx)</h3>
+              <p style="font-size:0.82rem; color:var(--muted);">Complete 12-section report with GIS map, CAD plan, cross-sections, photos &amp; O&amp;M schedules.</p>
+              <button id="dlDocx" class="btn btn-primary btn-sm" style="width:100%;">Download OSSM .DOCX</button>
+            </div>
+            <div class="card-alt">
+              <div class="kpi-label">Native AutoCAD Drawing</div>
+              <h3 style="margin:6px 0;">12-Layer CAD Plan (.dxf)</h3>
+              <p style="font-size:0.82rem; color:var(--muted);">Metric R2010 DXF opening directly in AutoCAD, BricsCAD &amp; QGIS with separate layers.</p>
+              <button id="dlDxf" class="btn btn-primary btn-sm" style="width:100%;">Download Layout .DXF</button>
+            </div>
+            <div class="card-alt">
+              <div class="kpi-label">Immutable Audit Record</div>
+              <h3 style="margin:6px 0;">Compliance Bundle (.json)</h3>
+              <p style="font-size:0.82rem; color:var(--muted);">PI-insurance audit trail of inputs, live NSW GIS, OSmodel outputs &amp; clause citations.</p>
+              <button id="dlJson" class="btn btn-outline btn-sm" style="width:100%;">Download Audit .JSON</button>
+            </div>
+          </div>
+
+          <!-- Gemini Grounded OSSM Narrative Writer -->
+          <details style="margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:12px 16px; background:var(--surface-alt);">
+            <summary style="cursor:pointer; font-weight:700; color:var(--heading); font-size:0.93rem;">
+              ✨ Customise Written OSSM Narrative with Gemini AI (Optional — All Math Stays 100% Locked)
+            </summary>
+            <div style="margin-top:12px;">
+              <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:10px;">
+                <div class="field" style="flex:1; margin:0;">
+                  <label>Consultant Drafting Instructions (Optional)</label>
+                  <input id="aiDraftInstructions" placeholder="e.g. Emphasise staged agritourism rollout, passive reed bed reliability, and kitchen grease trap controls..." />
+                </div>
+                <button id="btnAiDraft" type="button" class="btn btn-primary btn-sm" style="height:39px;">Draft Custom Narrative</button>
+                <button id="btnAiClearNarratives" type="button" class="btn btn-outline btn-sm" style="height:39px;">Reset Standard</button>
+              </div>
+              <div id="aiDraftStatus" style="font-size:0.81rem; color:var(--muted); margin-bottom:10px;"></div>
+              <div class="grid-2" style="gap:10px;">
+                <div class="field"><label>Section 1 — Executive Summary</label><textarea id="narExec" rows="3"></textarea></div>
+                <div class="field"><label>Section 1.1 — System Selection Justification</label><textarea id="narJust" rows="3"></textarea></div>
+                <div class="field"><label>Section 2 — Development &amp; Site Context</label><textarea id="narCtx" rows="3"></textarea></div>
+                <div class="field"><label>Section 9.1a — Commercial / Grease Trap &amp; Surge Notes</label><textarea id="narComm" rows="3"></textarea></div>
+                <div class="field"><label>Section 5 — Soil &amp; Site Interpretation</label><textarea id="narSoil" rows="2"></textarea></div>
+                <div class="field"><label>Section 10.5 — Custom Site O&amp;M / Guest Guidance</label><textarea id="narOm" rows="2"></textarea></div>
+              </div>
+            </div>
+          </details>
+
+          <!-- Embedded Drawings Preview -->
+          <details open style="margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:12px 16px; background:var(--surface-alt);">
+            <summary style="cursor:pointer; font-weight:700; color:var(--heading); font-size:0.93rem;">
+              Preview Embedded Drawings Included in Compiled OSSM .DOCX
+            </summary>
+            <div style="margin-top:12px;">
+              <div style="margin-bottom:14px;">
+                <div class="kpi-label" style="margin-bottom:4px;">Cover Sheet — Proposed Treatment Train</div>
+                <div class="drawing-frame" id="prevTreatmentTrain"></div>
+              </div>
+              <div class="grid-2" style="gap:14px;">
+                <div>
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 3 — GDA2020 GIS Site Location Map (OSSM-GIS-01)</div>
+                  <div class="drawing-frame" id="prevGisMap"></div>
+                </div>
+                <div id="prevGreaseWrap" style="display:none;">
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 9.1a — Commercial Grease Arrestor Cross-Section</div>
+                  <div class="drawing-frame" id="prevGreaseXsec"></div>
+                </div>
+                <div>
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 9.2 — Septic Tank Cross-Section (AS/NZS 1546.1)</div>
+                  <div class="drawing-frame" id="prevSepticXsec"></div>
+                </div>
+                <div id="prevReedBedWrap">
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 9.3 — Rigid Reed Bed Cross-Section</div>
+                  <div class="drawing-frame" id="prevReedBedXsec"></div>
+                </div>
+                <div>
+                  <div class="kpi-label" style="margin-bottom:4px;" id="prevLaaLabel">Section 9.4 — Disposal Field Cross-Section</div>
+                  <div class="drawing-frame" id="prevLaaXsec"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-ossm-model">← Sizing, CAD &amp; Audit</button>
+          <button type="button" class="btn btn-primary" id="btnNextFromOssmExport" style="display:none;" data-goto="panel-see-plan">Continue to DA SEE Workflow →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 6 (SEE): DA PROPOSAL & LISMORE LEP / DCP CONTROLS
+           ================================================================ -->
+      <section id="panel-see-plan" class="tab-panel">
+        <div class="card" style="margin-bottom:16px;">
+          <span class="badge badge-pass">Lismore LEP 2012 · Lismore DCP 2012 (Part A) · EP&amp;A Act 1979 s4.15</span>
+          <h2 style="margin:8px 0 4px;">DA Proposal &amp; Statutory Planning Triggers</h2>
+          <div id="seeTriggerBanner" style="margin-top:10px; padding:10px 12px; border-radius:9px; background:var(--surface-alt); border:1px solid var(--border); font-size:0.83rem;"></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3 style="margin-top:0; font-size:1.1rem;">Built Form, Earthworks &amp; Operations</h3>
+            <div class="grid-2" style="gap:10px;">
+              <div class="field">
+                <label>Development Type</label>
+                <select id="seeDevType">
+                  <option value="dwelling_house">Dwelling House</option>
+                  <option value="secondary_dwelling">Secondary Dwelling (Granny Flat)</option>
+                  <option value="dual_occupancy">Dual Occupancy (Attached / Detached)</option>
+                  <option value="shed_outbuilding">Shed / Farm Outbuilding (Class 10)</option>
+                  <option value="agritourism_farm_stay">Agritourism / Farm Stay Cabins</option>
+                  <option value="farm_gate_food_processing">Farm-Gate / On-Farm Food Processing</option>
+                  <option value="subdivision_rural">Rural Subdivision / Boundary Adjustment</option>
+                  <option value="commercial_change_of_use">Commercial / Change of Use</option>
+                  <option value="other">Other Development</option>
+                </select>
+              </div>
+              <div class="field"><label>Estimated Cost (AUD $)</label><input id="seeCost" type="number" step="5000" value="350000" /></div>
+              <div class="field" style="grid-column:1/-1;"><label>Proposal Title (DA Cover Title)</label><input id="seeTitle" value="Proposed Rural Residential Development &amp; Ancillary Works" /></div>
+              <div class="field"><label>Gross Floor Area (m²)</label><input id="seeGfa" type="number" step="5" value="180" /></div>
+              <div class="field"><label>Max Building Height (m)</label><input id="seeHeight" type="number" step="0.1" value="5.8" /></div>
+              <div class="field"><label>Storeys</label><input id="seeStoreys" type="number" min="1" max="5" value="1" /></div>
+              <div class="field"><label>On-Site Parking Spaces</label><input id="seeParking" type="number" min="0" value="2" /></div>
+              <div class="field"><label>Max Cut Depth (m)</label><input id="seeCut" type="number" step="0.1" value="0.8" /></div>
+              <div class="field"><label>Max Fill Depth (m)</label><input id="seeFill" type="number" step="0.1" value="0.6" /></div>
+              <div class="field"><label>Disturbed Area (m²)</label><input id="seeDisturbed" type="number" step="25" value="450" /></div>
+              <div class="field"><label>Native Trees Removed</label><input id="seeTrees" type="number" min="0" value="0" /></div>
+              <div class="field"><label>Est. Vehicle Movements / Day</label><input id="seeTraffic" type="number" min="0" value="6" /></div>
+              <div class="field"><label>Operating Hours (Optional)</label><input id="seeHours" placeholder="e.g. Thu–Sun 9am–4pm" /></div>
+              <div class="field" style="grid-column:1/-1;"><label>Max Staff / Guests Capacity (Optional)</label><input id="seeStaffGuests" placeholder="e.g. Max 6 overnight guests across 3 cabins + 2 staff" /></div>
+              <div class="field" style="grid-column:1/-1;"><label>Proposal Summary</label><textarea id="seeSummary" rows="2" placeholder="Describe buildings, staging, ancillary structures, and intended use..."></textarea></div>
+              <div class="field" style="grid-column:1/-1;"><label>External Materials &amp; Colours</label><input id="seeMaterials" value="Colorbond corrugated metal roof (muted woodland tones), timber/fibre-cement cladding, aluminium glazing" /></div>
+              <label style="grid-column:1/-1; display:flex; align-items:center; gap:8px; font-size:0.83rem; font-weight:600;">
+                <input id="seeLinkOssm" type="checkbox" checked style="width:auto;" /> Auto-link active Section 68 OSSM System sizing into SEE (LEP Cl. 6.9 &amp; Section 7)
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-top:0; font-size:1.1rem;">Services, Environmental Safeguards &amp; Site History</h3>
+            <div class="field"><label>Existing Site Use &amp; Structures</label><input id="seeExisting" value="Rural allotment with existing farm access track, pasture cover, and scattered native vegetation" /></div>
+            <div class="field"><label>Vehicular Access &amp; Sightlines (DCP Ch. 7)</label><input id="seeAccess" value="Existing rural vehicular crossover onto sealed/formed public road with compliant sightlines" /></div>
+            <div class="field"><label>Stormwater &amp; Water Sensitive Design (DCP Ch. 22)</label><input id="seeStormwater" value="Roof water captured to rainwater tanks with overflow directed via level spreader to grassed dispersion swale (zero increase in peak runoff)" /></div>
+            <div class="field"><label>Vegetation &amp; Koala Habitat Notes (DCP Ch. 14)</label><input id="seeVeg" value="Sited in cleared pasture area avoiding remnant native vegetation and Koala feed trees" /></div>
+            <div class="field"><label>Construction Waste &amp; Erosion/Sediment Control (ESCP)</label><input id="seeEscp" value="Silt fences downslope of all earthworks, stabilised site entry, skip bin waste segregation, and prompt grass stabilisation" /></div>
+            <div class="field"><label>Neighbour Amenity (Privacy, Noise, Bulk)</label><input id="seeAmenity" value="Generous rural setbacks ensure zero overshadowing, zero acoustic nuisance, and retention of rural visual character" /></div>
+            <div class="field"><label>Contamination &amp; Cattle Dip History (SEPP Resilience &amp; Hazards)</label><input id="seeContam" value="No known historical cattle dip sites, underground fuel storage, or contaminating industrial uses observed; verify Council cattle dip register" /></div>
+          </div>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="btnBackFromSeePlan">← Previous Step</button>
+          <button type="button" class="btn btn-primary" data-goto="panel-see-export">Next: Draft &amp; Export SEE (.DOCX) →</button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PANEL 7 (SEE): DRAFT & EXPORT LISMORE SEE (.DOCX)
+           ================================================================ -->
+      <section id="panel-see-export" class="tab-panel">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:14px;">
+            <div>
+              <span class="badge badge-pass">NSW Planning Portal DA Ready · Browser Pyodide WASM</span>
+              <h2 style="margin:8px 0 4px;">Draft &amp; Compile Lismore Statement of Environmental Effects (.DOCX)</h2>
+              <p style="margin:0; color:var(--muted); max-width:740px; font-size:0.86rem;">
+                Generates a complete 10-section SEE with Lismore LEP 2012 &amp; DCP 2012 compliance matrices, live GDA2020 GIS Site Location Map (<code>SEE-GIS-01</code>), Site Photos, Environmental Mitigation Schedule, and DA Lodgement Checklist.
+              </p>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              <button id="btnCompileSee" type="button" class="btn btn-accent">Compile Lismore SEE (.DOCX)</button>
+              <button id="btnDownloadSee" type="button" class="btn btn-primary" style="display:none;">Download SEE .DOCX</button>
+              <button id="btnArchiveSeeR2" type="button" class="btn btn-outline" disabled>Save SEE to R2</button>
+            </div>
+          </div>
+
+          <div id="seeLog" class="console-box" style="margin-top:14px;">
+            Ready. Optionally draft tailored town-planning prose with Gemini below, then click "Compile Lismore SEE (.DOCX)".
+          </div>
+
+          <!-- Gemini SEE Drafter -->
+          <div class="card-alt" style="margin-top:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <h3 style="margin:0; font-size:1.05rem;">✨ Customise SEE Narrative with Gemini (Reads Shared Vault + Brief + GIS + OSSM)</h3>
+              <button id="btnAiDraftSee" type="button" class="btn btn-primary btn-sm">Draft Bespoke SEE with Gemini</button>
+            </div>
+            <div class="field" style="margin-bottom:8px;">
+              <label>Town Planning Instructions (Optional)</label>
+              <input id="seeAiInstructions" placeholder="e.g. Emphasise RU1 agritourism objectives, flood-free ridge siting, and staged farm-gate rollout..." />
+            </div>
+            <div id="seeAiStatus" style="font-size:0.81rem; color:var(--muted); margin-bottom:10px;"></div>
+            <div class="grid-2" style="gap:10px;">
+              <div class="field" style="margin:0;"><label>Section 1 — Executive Summary</label><textarea id="seeNarExec" rows="3"></textarea></div>
+              <div class="field" style="margin:0;"><label>Section 2 — Site &amp; Locality Context</label><textarea id="seeNarSite" rows="3"></textarea></div>
+              <div class="field" style="margin:0;"><label>Section 3 — Proposal Details</label><textarea id="seeNarProp" rows="3"></textarea></div>
+              <div class="field" style="margin:0;"><label>Section 5 — LEP Zone Justification</label><textarea id="seeNarZone" rows="3"></textarea></div>
+              <div class="field" style="margin:0;"><label>Section 7 — Impacts &amp; Mitigation</label><textarea id="seeNarImp" rows="3"></textarea></div>
+              <div class="field" style="margin:0;"><label>Section 8 — Suitability &amp; Public Interest</label><textarea id="seeNarSuit" rows="3"></textarea></div>
+            </div>
+          </div>
+
+          <details open style="margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:12px 16px; background:var(--surface-alt);">
+            <summary style="cursor:pointer; font-weight:700; color:var(--heading); font-size:0.93rem;">
+              Preview Embedded GIS Site Location Map (SEE-GIS-01)
+            </summary>
+            <div style="margin-top:12px;" class="drawing-frame" id="prevSeeGisMap"></div>
+          </details>
+        </div>
+
+        <div class="ws-step-footer">
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-see-plan">← DA Proposal &amp; LEP</button>
+          <button type="button" class="btn btn-outline btn-sm" data-goto="panel-dashboard">Finish &amp; Return to Dashboard</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- =====================================================================
+       NEW PROJECT WIZARD MODAL (Scope + Brief + Existing Docs Upload)
+       ===================================================================== -->
+  <div class="ws-modal-backdrop" id="newJobModal" role="dialog" aria-modal="true" aria-labelledby="newJobModalTitle">
+    <div class="ws-modal">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div>
+          <span class="badge badge-info">Field To Forest · Project Setup</span>
+          <h2 id="newJobModalTitle" style="margin:6px 0 0; font-size:1.35rem;">Create New Lismore Consulting Job</h2>
+        </div>
+        <button type="button" id="btnCloseNewJob" class="btn btn-outline btn-sm">✕ Close</button>
+      </div>
+
+      <!-- Step 1: Choose Consulting Deliverables -->
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:0.8rem; font-weight:700; color:var(--muted); margin-bottom:7px; text-transform:uppercase; letter-spacing:0.05em;">
+          1. Select Consulting Work for This Project (Pick One or Both)
+        </label>
+        <div class="grid-2" style="gap:10px;">
+          <label class="deliverable-choice selected" id="choiceOssmCard">
+            <input type="checkbox" id="njScopeOssm" checked style="margin-top:3px; width:auto;" />
+            <span>
+              <strong style="display:block; color:var(--heading); font-size:0.92rem;">Section 68 OSSM Report &amp; CAD</strong>
+              <span style="font-size:0.78rem; color:var(--muted);">7,670-day OSmodel300614, Soil Logs, Grease Traps, Multi-Use/Cabins, Cross-Sections, .DOCX + .DXF</span>
+            </span>
+          </label>
+          <label class="deliverable-choice selected" id="choiceSeeCard">
+            <input type="checkbox" id="njScopeSee" checked style="margin-top:3px; width:auto;" />
+            <span>
+              <strong style="display:block; color:var(--heading); font-size:0.92rem;">Statement of Environmental Effects (SEE)</strong>
+              <span style="font-size:0.78rem; color:var(--muted);">Lismore LEP 2012, DCP 2012, EP&amp;A Act s4.15, Bushfire/Flood/ASS Checks, DA Checklist &amp; .DOCX</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Step 2: Property & Client -->
+      <label style="display:block; font-size:0.8rem; font-weight:700; color:var(--muted); margin-bottom:7px; text-transform:uppercase; letter-spacing:0.05em;">
+        2. Client &amp; Property Identification
+      </label>
+      <div class="grid-2" style="gap:10px;">
+        <div class="field"><label>Client / Applicant Name</label><input id="njApplicant" placeholder="e.g. Jane Smith" /></div>
+        <div class="field"><label>Project Ref (Auto if blank)</label><input id="njRef" placeholder="e.g. FTF-2026-204" /></div>
+        <div class="field" style="grid-column:1/-1;"><label>Site Street Address</label><input id="njAddress" placeholder="e.g. 120 Sample Creek Rd, Lismore NSW 2480" /></div>
+        <div class="field"><label>Lot Number</label><input id="njLot" placeholder="12" /></div>
+        <div class="field"><label>Plan Label (DP / SP)</label><input id="njPlan" placeholder="DP123456" /></div>
+      </div>
+
+      <!-- Step 3: Brief & Existing Docs -->
+      <label style="display:block; font-size:0.8rem; font-weight:700; color:var(--muted); margin:6px 0 7px; text-transform:uppercase; letter-spacing:0.05em;">
+        3. Project Brief &amp; Existing Documents (Shared Across Selected Workflows)
+      </label>
+      <div class="field">
+        <label>Project Brief / Client Notes / Scope</label>
+        <textarea id="njBrief" rows="3" placeholder="Enter client brief, building count, cabins, commercial kitchen/grease trap needs, staging, or constraints..."></textarea>
+      </div>
+      <div class="field">
+        <label>Attach Existing PDFs, Architectural Plans, Maps, Old Reports or Field Notes (Multi-file)</label>
+        <input id="njFiles" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.csv,.mp3,.wav,.m4a,.webm" />
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.83rem; font-weight:600; margin-bottom:14px;">
+        <input id="njAutoGis" type="checkbox" checked style="width:auto;" /> Automatically fetch Live NSW GIS Cadastre &amp; Planning Overlays on create
+      </label>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button type="button" id="btnCancelNewJob" class="btn btn-outline">Cancel</button>
+        <button type="button" id="btnConfirmNewJob" class="btn btn-accent">Create Project &amp; Open Workspace →</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="/consulting/app/app.js?v=10"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+{
+  "lga": "Lismore City Council",
+  "state": "NSW",
+  "crs_epsg": 7856,
+  "crs_name": "GDA2020 / MGA zone 56",
+  "strategy_reference": "Lismore City Council On-Site Sewage and Wastewater Management Strategy (2013)",
+  "model_reference": "Lismore CC On-site Wastewater Model (Single Rural Households) OSmodel300614.xls",
+  "companion_standards": [
+    "AS/NZS 1547:2012 On-site domestic-wastewater management",
+    "AS/NZS 1546.1:2008 / AS1546:1998 On-site domestic wastewater treatment units",
+    "NSW Environment & Health Protection Guidelines: On-site Sewage Management for Single Households (1998)",
+    "Local Government Act 1993 (Section 68)",
+    "Rous Water On-site Wastewater Management Guidelines (2008)"
+  ],
+  "water_supply_flows_lpd": {
+    "reticulated_standard": {
+      "label": "Reticulated supply (bore, spring, creek) - standard fixtures",
+      "lpd": 180,
+      "clause": "LCC Strategy 2013 Appendix B Table B1"
+    },
+    "reticulated_full_water_saving": {
+      "label": "Reticulated + full water saving devices (WELS >= 5 star)",
+      "lpd": 150,
+      "clause": "LCC Strategy 2013 Appendix B Table B1"
+    },
+    "roof_standard": {
+      "label": "Roof water harvesting - standard fixtures",
+      "lpd": 140,
+      "clause": "LCC Strategy 2013 Appendix B Table B1"
+    },
+    "roof_full_water_saving": {
+      "label": "Roof water harvest + full water saving devices (WELS >= 5 star)",
+      "lpd": 120,
+      "clause": "LCC Strategy 2013 Appendix B Table B1"
+    }
+  },
+  "wastewater_source_fractions": {
+    "toilet":   {"water": 0.32, "tn": 0.70,       "tp": 0.40,       "bod": 0.50},
+    "bathroom": {"water": 0.38, "tn": 0.046875,   "tp": 0.00689655, "bod": 0.05},
+    "laundry":  {"water": 0.23, "tn": 0.1125,     "tp": 0.37931034, "bod": 0.25},
+    "kitchen":  {"water": 0.07, "tn": 0.140625,   "tp": 0.21379310, "bod": 0.20}
+  },
+  "septic_tank_capacities_l": {
+    "all_wastewater": {"1_to_5": 3000, "6_to_10": 4500},
+    "greywater_only": {"1_to_5": 1800, "6_to_10": 2700},
+    "blackwater_only": {"1_to_5": 1500, "6_to_10": 2500}
+  },
+  "buffers_m": {
+    "perennial_or_intermittent_watercourse": {"required_m": 100.0, "min_model_m": 50.0, "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "gully_ephemeral":                       {"required_m": 40.0,  "min_model_m": 20.0, "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "domestic_groundwater_bore":             {"required_m": 250.0, "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "property_boundary_eta_upgradient":      {"required_m": 12.0,  "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "property_boundary_eta_downgradient":    {"required_m": 6.0,   "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "property_boundary_ssi_upgradient":      {"required_m": 6.0,   "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "property_boundary_ssi_downgradient":    {"required_m": 3.0,   "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "building_pool_driveway_upgradient":     {"required_m": 6.0,   "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "building_pool_driveway_downgradient":   {"required_m": 3.0,   "clause": "LCC Strategy 2013 s5.4.1(f) & Table 6"},
+    "septic_tank_to_building":               {"required_m": 3.0,   "clause": "LCC Strategy 2013 Appendix A s1.0"},
+    "telegraph_pole":                        {"required_m": 10.0,  "clause": "LCC Strategy 2013 s5.4.1(f)"},
+    "small_tree_lt_3m_eta":                  {"required_m": 5.0,   "clause": "LCC Strategy 2013 s5.4.1(n)"}
+  },
+  "design_limits": {
+    "eta_max_slope_pct": 15.0,
+    "eta_max_bed_length_m": 20.0,
+    "eta_min_bed_separation_m": 2.0,
+    "eta_max_beds_distribution_box": 3,
+    "min_boreholes": 2,
+    "min_borehole_depth_mm": 1000,
+    "min_soil_depth_below_eta_base_mm": 600,
+    "ideal_ph_min": 5.5,
+    "reed_bed_min_hrt_days_secondary": 5.0,
+    "reed_bed_standard_hrt_days": 7.0,
+    "reed_bed_flexible_liner_permitted": false
+  },
+  "soil_textures": [
+    {"id": 1,  "category": 1, "name": "Gravels, Sands",                            "ksat_md": ">3.0",       "primary_dlr": 20.0, "secondary_trench_dlr": 50.0, "ssi_dir": 5.0, "porosity_root": 0.38, "awc_root": 0.14, "porosity_gravel": 0.43},
+    {"id": 2,  "category": 2, "name": "Sandy loams - weakly structured",           "ksat_md": ">3.0",       "primary_dlr": 20.0, "secondary_trench_dlr": 50.0, "ssi_dir": 5.0, "porosity_root": 0.38, "awc_root": 0.14, "porosity_gravel": 0.43},
+    {"id": 3,  "category": 2, "name": "Sandy loams - massive",                     "ksat_md": "1.4 - 3.0",  "primary_dlr": 15.0, "secondary_trench_dlr": 50.0, "ssi_dir": 5.0, "porosity_root": 0.38, "awc_root": 0.14, "porosity_gravel": 0.43},
+    {"id": 4,  "category": 3, "name": "Loams - high/moderate structured",          "ksat_md": "1.5 - 3.0",  "primary_dlr": 15.0, "secondary_trench_dlr": 50.0, "ssi_dir": 4.0, "porosity_root": 0.37, "awc_root": 0.15, "porosity_gravel": 0.43},
+    {"id": 5,  "category": 3, "name": "Loams - weakly structured or massive",      "ksat_md": "0.5 - 1.5",  "primary_dlr": 10.0, "secondary_trench_dlr": 30.0, "ssi_dir": 4.0, "porosity_root": 0.37, "awc_root": 0.15, "porosity_gravel": 0.43},
+    {"id": 6,  "category": 4, "name": "Clay loams - high/mod structured",          "ksat_md": "0.5 - 1.5",  "primary_dlr": 10.0, "secondary_trench_dlr": 30.0, "ssi_dir": 3.5, "porosity_root": 0.37, "awc_root": 0.15, "porosity_gravel": 0.43},
+    {"id": 7,  "category": 4, "name": "Clay loams - weakly structured",            "ksat_md": "0.12 - 0.5", "primary_dlr": 6.0,  "secondary_trench_dlr": 20.0, "ssi_dir": 3.5, "porosity_root": 0.37, "awc_root": 0.15, "porosity_gravel": 0.43},
+    {"id": 8,  "category": 4, "name": "Clay loams - massive structured",           "ksat_md": "0.06 - 0.12","primary_dlr": 4.0,  "secondary_trench_dlr": 10.0, "ssi_dir": 3.5, "porosity_root": 0.37, "awc_root": 0.15, "porosity_gravel": 0.43},
+    {"id": 9,  "category": 5, "name": "Light clays - strongly structured",         "ksat_md": "0.12 - 0.5", "primary_dlr": 5.0,  "secondary_trench_dlr": 12.0, "ssi_dir": 3.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 10, "category": 5, "name": "Light clays - moderately structured",       "ksat_md": "0.06 - 0.12","primary_dlr": null, "secondary_trench_dlr": 10.0, "ssi_dir": 3.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 11, "category": 5, "name": "Light clays - weak. structured or massive", "ksat_md": "<0.06",      "primary_dlr": null, "secondary_trench_dlr": 8.0,  "ssi_dir": 3.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 12, "category": 6, "name": "Med. to heavy clays - strong. Structure",   "ksat_md": "0.06 - 0.5", "primary_dlr": null, "secondary_trench_dlr": 5.0,  "ssi_dir": 2.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 13, "category": 6, "name": "Med. to heavy clays - mod. Structured",     "ksat_md": "<0.06",      "primary_dlr": null, "secondary_trench_dlr": 4.0,  "ssi_dir": 2.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 14, "category": 6, "name": "Med. to hvy clays - weak. struct./ massive","ksat_md": "<0.06",      "primary_dlr": null, "secondary_trench_dlr": 4.0,  "ssi_dir": 2.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43},
+    {"id": 15, "category": 6, "name": "DISPERSIVE (Modified Emerson test)",        "ksat_md": "<0.06",      "primary_dlr": null, "secondary_trench_dlr": 4.0,  "ssi_dir": 2.0, "porosity_root": 0.34, "awc_root": 0.13, "porosity_gravel": 0.43}
+  ],
+  "morand_soil_units": {
+    "ba": {"unit": "Bagotville",     "group": "Duplex Soils",        "broad_type": "Sandy Duplex",                "p_sorption": 8000,  "unsuitable": false, "limitations": "Flood prone footslopes."},
+    "bg": {"unit": "Bangalow",       "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic",                "p_sorption": 10000, "unsuitable": false, "limitations": "Steep, shallow. May need skinny beds/trenches on slopes."},
+    "bp": {"unit": "Burns Point",    "group": "Unsuitable",          "broad_type": "Alluvial / Humic Gleys",      "p_sorption": null,  "unsuitable": true,  "limitations": "Unsuitable for effluent disposal."},
+    "cc": {"unit": "Coffee Camp",    "group": "Duplex Soils",        "broad_type": "Sandy Duplex",                "p_sorption": 8000,  "unsuitable": false, "limitations": "Shallow, steep. May need skinny beds/trenches on slopes."},
+    "ck": {"unit": "Coraki",         "group": "Duplex Soils",        "broad_type": "Sandy Duplex",                "p_sorption": 8000,  "unsuitable": false, "limitations": "Low CEC. Localised seasonal waterlogging."},
+    "cl": {"unit": "Calico",         "group": "Duplex Soils",        "broad_type": "Clayey Duplex",               "p_sorption": 8000,  "unsuitable": false, "limitations": "Steep, dispersive soils. Mass movement. May need skinny beds/trenches on slopes."},
+    "co": {"unit": "Coolamon",       "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic / Dark Basaltic","p_sorption": 10000, "unsuitable": false, "limitations": "Steep, shallow, stony soils, mass movement."},
+    "dp": {"unit": "Disputed Plain", "group": "Alluvial Soils",      "broad_type": "Alluvial (highly reactive)",  "p_sorption": 10000, "unsuitable": false, "limitations": "Waterlogged, impermeable soils, high watertables."},
+    "du": {"unit": "Dungarubba",     "group": "Unsuitable",          "broad_type": "Includes some Humic Gley",    "p_sorption": null,  "unsuitable": true,  "limitations": "Flood hazard, waterlogging, permanently high watertables. Unsuitable for effluent disposal."},
+    "el": {"unit": "Eltham",         "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic",                "p_sorption": 10000, "unsuitable": false, "limitations": "Locally waterlogged, flood hazard, proximity to streams."},
+    "ep": {"unit": "Empire Vale",    "group": "Alluvial Soils",      "broad_type": "Alluvial (highly reactive)",  "p_sorption": 10000, "unsuitable": false, "limitations": "Dispersive, waterlogged subsoils, high watertables."},
+    "ew": {"unit": "Ewingsdale",     "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic",                "p_sorption": 10000, "unsuitable": false, "limitations": "High permeability, but mass movement hazard near drainage lines, waterlogging on lower slopes."},
+    "fr": {"unit": "Frederick",      "group": "Dark Basaltic Soils", "broad_type": "Dark Basaltic",               "p_sorption": 12000, "unsuitable": false, "limitations": "Low to moderate permeability. May be shallow and rocky, seasonal waterlogging."},
+    "ge": {"unit": "Georgica",       "group": "Dark Basaltic Soils", "broad_type": "Dark Basaltic",               "p_sorption": 12000, "unsuitable": false, "limitations": "Low to moderate permeability. May be shallow and rocky, seasonal waterlogging. May need skinny beds/trenches on slopes."},
+    "le": {"unit": "Leycester",      "group": "Alluvial Soils",      "broad_type": "Alluvial (highly reactive)",  "p_sorption": 10000, "unsuitable": false, "limitations": "Shrink-swell soils, localised waterlogging and high watertables."},
+    "ma": {"unit": "Mackellar",      "group": "Dark Basaltic Soils", "broad_type": "Dark Basaltic",               "p_sorption": 12000, "unsuitable": false, "limitations": "Very steep slopes, shallow soils. May need skinny beds/trenches on slopes."},
+    "mb": {"unit": "Mount Burrel",   "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic / Dark Basaltic","p_sorption": 10000, "unsuitable": false, "limitations": "Steep slopes, mass movement. May need skinny beds/trenches on slopes."},
+    "mc": {"unit": "McKee",          "group": "Dark Basaltic Soils", "broad_type": "Dark Basaltic",               "p_sorption": 12000, "unsuitable": false, "limitations": "Shallow soils, seasonal waterlogging."},
+    "mi": {"unit": "Minyon",         "group": "Duplex Soils",        "broad_type": "Sandy / Clayey Duplex",       "p_sorption": 8000,  "unsuitable": false, "limitations": "Steep slopes, rockiness, seasonal waterlogging and shallow soils (all localised)."},
+    "nc": {"unit": "North Casino",   "group": "Alluvial Soils",      "broad_type": "Alluvial (highly reactive)",  "p_sorption": 10000, "unsuitable": false, "limitations": "Shrink-swell soils, localised waterlogging and high watertables."},
+    "ni": {"unit": "Nightcap",       "group": "Duplex Soils",        "broad_type": "Varied: Red Basaltic / Clayey Duplex", "p_sorption": 8000, "unsuitable": false, "limitations": "Steep slopes, mass movement, rockiness."},
+    "nr": {"unit": "Nimbin Rocks",   "group": "Unsuitable",          "broad_type": "Nimbin Rhyolite",             "p_sorption": null,  "unsuitable": true,  "limitations": "Severe limitations for development on cliff-footslopes."},
+    "ro": {"unit": "Rosebank",       "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic",                "p_sorption": 10000, "unsuitable": false, "limitations": "Steep slopes, mass movement. May need skinny beds/trenches on slopes."},
+    "te": {"unit": "Terania",        "group": "Alluvial Soils",      "broad_type": "Alluvial (varied)",           "p_sorption": 10000, "unsuitable": false, "limitations": "Close to watercourse, flooding, stream-bank erosion, slumping."},
+    "tu": {"unit": "Tuckean",        "group": "Unsuitable",          "broad_type": "Humic Gley",                  "p_sorption": null,  "unsuitable": true,  "limitations": "Unsuitable for effluent disposal."},
+    "ty": {"unit": "Tyagarah",       "group": "Podzol Soils",        "broad_type": "Alluvial / Sandy Podzolic",   "p_sorption": 1000,  "unsuitable": false, "limitations": "Waterlogging, high watertables, low CEC."},
+    "wo": {"unit": "Wollongbar",     "group": "Red Basaltic Soils",  "broad_type": "Red Basaltic",                "p_sorption": 10000, "unsuitable": false, "limitations": "High permeability."}
+  },
+  "reed_bed_trays": [
+    {"model": "Duraplas Standard Reed Bed Tub", "length_m": 3.1, "width_m": 2.0, "depth_m": 0.64, "wetted_depth_m": 0.50, "area_m2": 6.2},
+    {"model": "Duraplas Deep Reed Bed Tub",     "length_m": 3.0, "width_m": 1.9, "depth_m": 0.87, "wetted_depth_m": 0.70, "area_m2": 5.7},
+    {"model": "Duraplas Extra Deep Tub",        "length_m": 3.1, "width_m": 2.0, "depth_m": 0.94, "wetted_depth_m": 0.75, "area_m2": 6.2}
+  ]
+}

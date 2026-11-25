@@ -1,0 +1,10 @@
+{
+  "name": "Field To Forest — OSSM Field Workbench",
+  "short_name": "FTF OSSM",
+  "start_url": "/consulting/app/",
+  "scope": "/consulting/",
+  "display": "standalone",
+  "background_color": "#0d241b",
+  "theme_color": "#143628",
+  "description": "Offline-first Lismore City Council Section 68 OSSM field capture, daily wastewater modelling, and CAD/DOCX generator by Field To Forest."
+}

@@ -1,0 +1,13 @@
+# Copy this file to `.dev.vars` (gitignored) for local `npm run dev`.
+# For Cloudflare production deployment, set secrets via `npx wrangler secret put <NAME>`.
+
+# Google Gemini API key (for PDF/SEE intake & custom report drafting)
+GEMINI_API_KEY=your_google_ai_studio_api_key_here
+GEMINI_MODEL=gemini-4-hydrogen
+
+# Admin Studio Password (REQUIRED in production; optional on localhost)
+# Tip: Use a strong 20+ character passphrase
+ADMIN_PASSWORD=change_me_to_a_long_random_passphrase
+
+# Random 32+ character signing key for HMAC-SHA256 session cookies
+SESSION_SECRET=change_me_to_a_different_long_random_secret

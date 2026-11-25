@@ -1,0 +1,888 @@
+/**
+ * Programmatic Engineering Cross-Sections & GDA2020/MGA56 GIS Site Map SVG Renderers
+ * for Lismore City Council Section 68 OSSM Reports (Field To Forest Environmental Consulting).
+ * Every label & dimension is dynamically driven from the single-source-of-truth model JSON.
+ */
+
+function esc(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** 1. Cover-page Treatment Train Graphic */
+export function renderTreatmentTrainSvg(inp, model) {
+  const hasRb = inp.treatment_system === "secondary_reed_bed";
+  const isAwts = inp.treatment_system === "secondary_awts";
+  const isIrrig = inp.land_application_type !== "eta_beds";
+  const tr = model.trench_layout;
+
+  const hasMulti = Array.isArray(model.source_breakdown) && model.source_breakdown.length > 0;
+  const steps = [
+    {
+      title: hasMulti ? "MULTI-USE SOURCES" : "SOURCE",
+      sub: hasMulti ? `${model.source_breakdown.length} Sources (${model.design_persons} EP)` : `${inp.bedrooms} BR Dwelling (${model.design_persons} EP)`,
+      detail: `${model.total_flow_ld} L/d · BOD ${model.weighted_influent_bod_mgl || 250}`,
+      fill: "#f1f5f9",
+      stroke: "#334155",
+    },
+  ];
+  if ((model.grease_arrestor_min_l || 0) > 0) {
+    steps.push({
+      title: "GREASE ARRESTOR",
+      sub: `${model.grease_arrestor_min_l} L Trap`,
+      detail: "AS/NZS 3500.2 FOG Capture",
+      fill: "#fef3c7",
+      stroke: "#b45309",
+    });
+  }
+  steps.push(
+    isAwts
+      ? { title: "SECONDARY AWTS", sub: "NSW Health Accredited", detail: "Aeration + Disinfection", fill: "#fed7aa", stroke: "#9a3412" }
+      : { title: "PRIMARY SEPTIC", sub: `${model.septic_tank_min_l} L Poly/Concrete`, detail: `Baffle + Filter (${model.septic_retention_days} d)`, fill: "#fed7aa", stroke: "#9a3412" },
+  );
+  if ((model.surge_tank_min_l || 0) > 0) {
+    steps.push({
+      title: "BALANCE TANK",
+      sub: `${model.surge_tank_min_l} L Surge`,
+      detail: "Timer-Dosed Equalisation",
+      fill: "#ede9fe",
+      stroke: "#6d28d9",
+    });
+  }
+  if (hasRb) {
+    steps.push({
+      title: "SECONDARY REED BED",
+      sub: `${model.recommended_reed_bed_count}× Rigid Tub (${model.recommended_reed_bed_provided_m2} m²)`,
+      detail: `HRT ${model.reed_bed_hrt_days} d · ${model.n_removal_pct}% N Rem.`,
+      fill: "#bbf7d0",
+      stroke: "#166534",
+    });
+  }
+  if (isIrrig) {
+    steps.push({
+      title: "PUMP WELL",
+      sub: "1,800 L + Alarm",
+      detail: "Disc Filter + Indexing Valve",
+      fill: "#e0f2fe",
+      stroke: "#0369a1",
+    });
+  }
+  steps.push({
+    title: isIrrig ? "IRRIGATION ZONE" : "ETA DISPOSAL FIELD",
+    sub: isIrrig
+      ? `${tr.trench_length_m} m × ${tr.trench_width_m} m (${model.required_laa_m2} m²)`
+      : `${tr.number_of_trenches}× Bed ${tr.trench_length_m} m × ${tr.trench_width_m} m`,
+    detail: `+ 100% Reserve (${model.reserve_laa_m2} m²)`,
+    fill: "#dbeafe",
+    stroke: "#1e40af",
+  });
+
+  const boxW = 165;
+  const gap = 28;
+  const W = steps.length * boxW + (steps.length - 1) * gap + 32;
+  const H = 108;
+
+  let body = "";
+  steps.forEach((st, i) => {
+    const x = 16 + i * (boxW + gap);
+    body += `
+      <rect x="${x}" y="18" width="${boxW}" height="74" rx="10" fill="${st.fill}" stroke="${st.stroke}" stroke-width="2" />
+      <text x="${x + boxW / 2}" y="38" text-anchor="middle" font-size="10.5" font-weight="800" fill="${st.stroke}">${esc(st.title)}</text>
+      <text x="${x + boxW / 2}" y="57" text-anchor="middle" font-size="10" font-weight="600" fill="#0f172a">${esc(st.sub)}</text>
+      <text x="${x + boxW / 2}" y="74" text-anchor="middle" font-size="9.5" fill="#475569">${esc(st.detail)}</text>
+    `;
+    if (i < steps.length - 1) {
+      const ax1 = x + boxW + 3;
+      const ax2 = x + boxW + gap - 4;
+      body += `<line x1="${ax1}" y1="55" x2="${ax2}" y2="55" stroke="#143628" stroke-width="2.2" marker-end="url(#ttArr)" />`;
+    }
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
+    <defs>
+      <marker id="ttArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#143628" />
+      </marker>
+    </defs>
+    ${body}
+  </svg>`;
+}
+
+/** 2. Cross-Section of Conventional Baffled Septic Tank (AS/NZS 1546.1 & LCC Appendix A) */
+export function renderSepticCrossSectionSvg(model) {
+  const W = 740, H = 390;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <defs>
+      <marker id="flowArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#1d4ed8" />
+      </marker>
+    </defs>
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13.5" font-weight="800" fill="#0d241b">
+      TYPICAL CROSS-SECTION — ${model.septic_tank_min_l} L BAFFLED SEPTIC TANK WITH EFFLUENT FILTER
+    </text>
+    <text x="${W / 2}" y="41" text-anchor="middle" font-size="10" fill="#52635c">
+      AS/NZS 1546.1 &amp; Lismore City Council OSSM Strategy (2013) Appendix A · Retention: ${model.septic_retention_days} days @ ${model.total_flow_ld} L/d
+    </text>
+
+    <!-- Ground line -->
+    <line x1="28" y1="84" x2="480" y2="84" stroke="#15803d" stroke-width="2" stroke-dasharray="8,4" />
+    <text x="36" y="77" font-size="9" font-weight="700" fill="#15803d">FINISHED GROUND LEVEL</text>
+
+    <!-- Crusher dust bedding -->
+    <rect x="78" y="314" width="354" height="18" fill="#d6d3d1" stroke="#57534e" stroke-width="1.2" />
+    <text x="255" y="327" text-anchor="middle" font-size="9" font-weight="700" fill="#292524">100 mm LEVEL COMPACTED CRUSHER-DUST BEDDING</text>
+
+    <!-- Tank outer shell -->
+    <rect x="86" y="96" width="338" height="218" fill="#eff6ff" stroke="#1e293b" stroke-width="3.2" />
+
+    <!-- Inspection openings & pump-out access lid -->
+    <rect x="116" y="84" width="34" height="12" fill="#cbd5e1" stroke="#1e293b" stroke-width="1.6" />
+    <rect x="230" y="84" width="52" height="12" fill="#cbd5e1" stroke="#1e293b" stroke-width="1.6" />
+    <rect x="356" y="84" width="34" height="12" fill="#cbd5e1" stroke="#1e293b" stroke-width="1.6" />
+    <text x="133" y="76" text-anchor="middle" font-size="10" font-weight="800" fill="#0f172a">1</text>
+    <text x="256" y="76" text-anchor="middle" font-size="10" font-weight="800" fill="#0f172a">3</text>
+    <text x="373" y="76" text-anchor="middle" font-size="10" font-weight="800" fill="#0f172a">2</text>
+
+    <!-- Liquid zone -->
+    <rect x="88" y="156" width="334" height="156" fill="#bfdbfe" />
+    <!-- Scum layer (chamber 1) -->
+    <rect x="88" y="148" width="214" height="24" fill="#fde68a" stroke="#b45309" stroke-width="1" />
+    <text x="195" y="164" text-anchor="middle" font-size="9.5" font-weight="700" fill="#78350f">7. SCUM LAYER</text>
+
+    <!-- Sludge layer -->
+    <path d="M 88 265 Q 155 245 210 278 T 302 288 L 302 312 L 88 312 Z" fill="#a8a29e" stroke="#57534e" stroke-width="1" />
+    <path d="M 310 294 Q 365 288 422 298 L 422 312 L 310 312 Z" fill="#a8a29e" stroke="#57534e" stroke-width="1" />
+    <text x="180" y="298" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1c1917">8. ACCUMULATED SLUDGE</text>
+
+    <!-- Internal baffle wall -->
+    <rect x="302" y="114" width="8" height="154" fill="#475569" />
+    <text x="292" y="218" text-anchor="end" font-size="9.5" font-weight="800" fill="#0f172a">6</text>
+
+    <!-- Inlet pipe & square junction -->
+    <rect x="44" y="122" width="82" height="12" fill="#94a3b8" stroke="#1e293b" stroke-width="1.3" />
+    <rect x="118" y="122" width="12" height="72" fill="#94a3b8" stroke="#1e293b" stroke-width="1.3" />
+    <line x1="28" y1="128" x2="62" y2="128" stroke="#1d4ed8" stroke-width="2" marker-end="url(#flowArr)" />
+    <text x="136" y="140" font-size="9.5" font-weight="800" fill="#0f172a">4</text>
+
+    <!-- Outlet pipe, square junction & effluent filter -->
+    <rect x="372" y="138" width="98" height="12" fill="#94a3b8" stroke="#1e293b" stroke-width="1.3" />
+    <rect x="366" y="138" width="16" height="86" fill="#fef08a" stroke="#1e293b" stroke-width="1.4" />
+    <line x1="366" y1="152" x2="382" y2="164" stroke="#1e293b" stroke-width="1" />
+    <line x1="366" y1="168" x2="382" y2="180" stroke="#1e293b" stroke-width="1" />
+    <line x1="366" y1="184" x2="382" y2="196" stroke="#1e293b" stroke-width="1" />
+    <line x1="366" y1="200" x2="382" y2="212" stroke="#1e293b" stroke-width="1" />
+    <line x1="436" y1="144" x2="478" y2="144" stroke="#1d4ed8" stroke-width="2" marker-end="url(#flowArr)" />
+    <text x="358" y="148" text-anchor="end" font-size="9.5" font-weight="800" fill="#0f172a">5</text>
+    <text x="392" y="190" font-size="9.5" font-weight="800" fill="#0f172a">9</text>
+
+    <!-- Flow path arrows -->
+    <path d="M 124 202 Q 160 226 218 228" fill="none" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#flowArr)" />
+    <path d="M 272 276 Q 318 282 346 254" fill="none" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#flowArr)" />
+
+    <!-- Legend panel -->
+    <rect x="498" y="84" width="222" height="248" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2" />
+    <text x="512" y="106" font-size="10.5" font-weight="800" fill="#0d241b">COMPONENT KEY</text>
+    <text x="512" y="128" font-size="9.5" fill="#1e293b">1 &amp; 2. Inspection Openings</text>
+    <text x="512" y="148" font-size="9.5" fill="#1e293b">3. Pump-Out Access Hatch</text>
+    <text x="512" y="168" font-size="9.5" fill="#1e293b">4 &amp; 5. Inlet / Outlet Squares</text>
+    <text x="512" y="188" font-size="9.5" fill="#1e293b">6. Internal Baffle Wall</text>
+    <text x="512" y="208" font-size="9.5" fill="#1e293b">7. Floating Scum Layer</text>
+    <text x="512" y="228" font-size="9.5" fill="#1e293b">8. Settled Sludge Zone</text>
+    <text x="512" y="248" font-size="9.5" font-weight="700" fill="#9a3412">9. Outlet Effluent Filter</text>
+    <text x="524" y="263" font-size="8.6" fill="#475569">(External U-trap recommended)</text>
+    <line x1="510" y1="278" x2="706" y2="278" stroke="#cbd5e1" />
+    <text x="512" y="295" font-size="8.6" fill="#334155">• Setback &gt; 3.0 m from buildings</text>
+    <text x="512" y="310" font-size="8.6" fill="#334155">• Desludge every 3–5 years</text>
+    <text x="512" y="325" font-size="8.6" fill="#334155">• Clean filter every 6 months</text>
+
+    <text x="${W / 2}" y="370" text-anchor="middle" font-size="9.5" fill="#52635c">
+      NOT TO SCALE — All plumbing &amp; tank installation to AS/NZS 3500 &amp; NSW Health Accreditation
+    </text>
+  </svg>`;
+}
+
+/** Helper to resolve physical Duraplas rigid reed bed tub dimensions (metres) */
+function resolveReedBedDims(model, inp) {
+  if (model?.recommended_reed_bed_dims && model.recommended_reed_bed_dims.length_m > 0) {
+    return model.recommended_reed_bed_dims;
+  }
+  const name = String(model?.recommended_reed_bed_model || "").toLowerCase();
+  if (name.includes("extra deep")) {
+    return { length_m: 3.1, width_m: 2.0, depth_m: 0.94, wetted_depth_m: 0.75, area_m2: 6.2 };
+  }
+  if (name.includes("standard")) {
+    return { length_m: 3.1, width_m: 2.0, depth_m: 0.64, wetted_depth_m: 0.50, area_m2: 6.2 };
+  }
+  // Default: Duraplas Deep Reed Bed Tub
+  const wd = Number(inp?.reed_bed_wetted_depth_m || 0.70);
+  return { length_m: 3.0, width_m: 1.9, depth_m: 0.87, wetted_depth_m: wd, area_m2: 5.7 };
+}
+
+/** 3. True-to-Scale Plan & Elevation Cross-Section of Rigid Reed Bed Tub(s) (LCC Reed Bed Guide & Strategy Appendix A s4.0) */
+export function renderReedBedCrossSectionSvg(inp, model) {
+  const W = 760;
+  const nTrays = Math.max(1, model.recommended_reed_bed_count || 1);
+  const dims = resolveReedBedDims(model, inp);
+  const tubL = Number(dims.length_m || 3.0);
+  const tubW = Number(dims.width_m || 1.9);
+  const tubD = Number(dims.depth_m || 0.87);
+  const wettedD = Math.max(0.35, Math.min(tubD - 0.08, Number(inp.reed_bed_wetted_depth_m || dims.wetted_depth_m || 0.70)));
+  const tubArea = Number(dims.area_m2 || (tubL * tubW));
+  const plantsPerTray = Math.max(12, Math.round(tubArea * 4.5));
+
+  // --- SECTION A: TRUE 1:1 SCALE LONGITUDINAL ELEVATION (1 RIGID TUB) ---
+  const elevScale = 132; // px per metre (exact same X and Y scale!)
+  const elevW = Math.round(tubL * elevScale); // e.g. 3.0m -> 396px
+  const elevH = Math.round(tubD * elevScale); // e.g. 0.87m -> 115px
+  const ex = Math.round((W - elevW) / 2); // centered cleanly (~182px left & right margins)
+  const ey = 96;
+  const wettedH = Math.round(wettedD * elevScale);
+  const waterY = ey + elevH - wettedH;
+  const rimFreeboardPx = Math.round(0.10 * elevScale); // 100mm rim proud of ground
+  const gndY = ey + rimFreeboardPx;
+  const ballastInW = Math.round(0.40 * elevScale); // 400mm inlet coarse rock zone
+  const ballastOutW = Math.round(0.45 * elevScale); // 450mm outlet coarse rock zone
+  const baseH = Math.max(12, Math.round(0.10 * elevScale)); // 100mm compacted crusher dust
+  const elevDimY = ey + elevH + baseH + 18;
+
+  // --- SECTION B: TRUE 1:1 SCALE PLAN VIEW (ALL nTrays CONNECTED IN SERIES) ---
+  const planHeaderY = elevDimY + 34;
+  const gapM = 0.5; // 500mm inter-tub link pipe clearance
+  const totalSeriesM = nTrays * tubL + (nTrays - 1) * gapM;
+  const maxPlanW = 520;
+  const maxPlanH = 166;
+  const planScale = Math.min(maxPlanW / totalSeriesM, maxPlanH / tubW); // exact uniform px/m!
+  const drawTubW = tubL * planScale;
+  const drawTubH = tubW * planScale;
+  const drawGap = gapM * planScale;
+  const arrW = totalSeriesM * planScale;
+  const startX = (W - arrW) / 2;
+  const py = planHeaderY + 28;
+
+  // Build scaled plan view tubs in series
+  const ballastInPlan = 0.40 * planScale;
+  const ballastOutPlan = 0.45 * planScale;
+  const plantCols = drawTubW >= 210 ? 4 : drawTubW >= 130 ? 3 : 2;
+  const plantRows = drawTubH >= 115 ? 3 : 2;
+  const plantR = Math.max(3.5, Math.min(8.5, planScale * 0.095));
+  const outBoxR = Math.max(6, Math.min(13, planScale * 0.14));
+
+  let planTubsSvg = "";
+  for (let t = 0; t < nTrays; t++) {
+    const tx = startX + t * (drawTubW + drawGap);
+    const midY = py + drawTubH / 2;
+    const spX = tx + Math.max(6, ballastInPlan * 0.45);
+    const spW = Math.max(5, Math.min(10, planScale * 0.10));
+    const inLineX = tx + ballastInPlan;
+    const outLineX = tx + drawTubW - ballastOutPlan;
+    const outCx = tx + drawTubW - ballastOutPlan * 0.48;
+
+    // Tub label cleanly above top edge (no collision with adjacent tubs)
+    const tubTitle = nTrays <= 2
+      ? `TUB ${t + 1}: ${tubL.toFixed(1)} m × ${tubW.toFixed(1)} m (${tubArea.toFixed(1)} m²)`
+      : `TUB ${t + 1} (${tubL.toFixed(1)}×${tubW.toFixed(1)} m)`;
+
+    // Macrophyte grid evenly spaced inside central 20mm aggregate zone
+    const zoneLeft = inLineX + plantR + 6;
+    const zoneRight = outLineX - plantR - 6;
+    const zoneTop = py + plantR + 10;
+    const zoneBot = py + drawTubH - plantR - 10;
+    let plantsSvg = "";
+    if (zoneRight > zoneLeft && zoneBot > zoneTop) {
+      for (let c = 0; c < plantCols; c++) {
+        const px = plantCols === 1 ? (zoneLeft + zoneRight) / 2 : zoneLeft + (c * (zoneRight - zoneLeft)) / (plantCols - 1);
+        for (let r = 0; r < plantRows; r++) {
+          const cy = plantRows === 1 ? (zoneTop + zoneBot) / 2 : zoneTop + (r * (zoneBot - zoneTop)) / (plantRows - 1);
+          plantsSvg += `<circle cx="${px.toFixed(1)}" cy="${cy.toFixed(1)}" r="${plantR.toFixed(1)}" fill="#4ade80" stroke="#166534" stroke-width="1.2" />`;
+        }
+      }
+    }
+
+    planTubsSvg += `
+      <text x="${(tx + drawTubW / 2).toFixed(1)}" y="${(py - 8).toFixed(1)}" text-anchor="middle" font-size="${nTrays > 3 ? 8.2 : 9}" font-weight="700" fill="#143628">${tubTitle}</text>
+      <rect x="${tx.toFixed(1)}" y="${py.toFixed(1)}" width="${drawTubW.toFixed(1)}" height="${drawTubH.toFixed(1)}" fill="#f0fdf4" stroke="#1e293b" stroke-width="2.6" />
+      <!-- Inlet & Outlet coarse rock zones -->
+      <rect x="${(tx + 1.5).toFixed(1)}" y="${(py + 1.5).toFixed(1)}" width="${Math.max(2, ballastInPlan - 1.5).toFixed(1)}" height="${(drawTubH - 3).toFixed(1)}" fill="#e7e5e4" opacity="0.7" />
+      <rect x="${outLineX.toFixed(1)}" y="${(py + 1.5).toFixed(1)}" width="${Math.max(2, ballastOutPlan - 1.5).toFixed(1)}" height="${(drawTubH - 3).toFixed(1)}" fill="#e7e5e4" opacity="0.7" />
+      <line x1="${inLineX.toFixed(1)}" y1="${(py + 2).toFixed(1)}" x2="${inLineX.toFixed(1)}" y2="${(py + drawTubH - 2).toFixed(1)}" stroke="#b45309" stroke-width="1.3" stroke-dasharray="4,3" />
+      <line x1="${outLineX.toFixed(1)}" y1="${(py + 2).toFixed(1)}" x2="${outLineX.toFixed(1)}" y2="${(py + drawTubH - 2).toFixed(1)}" stroke="#b45309" stroke-width="1.3" stroke-dasharray="4,3" />
+      <!-- 100mm slotted spreader manifold -->
+      <rect x="${(spX - spW / 2).toFixed(1)}" y="${(py + 10).toFixed(1)}" width="${spW.toFixed(1)}" height="${(drawTubH - 20).toFixed(1)}" fill="#94a3b8" stroke="#1e293b" stroke-width="1.1" />
+      <!-- Macrophytes -->
+      ${plantsSvg}
+      <!-- 150mm PVC outlet control box -->
+      <circle cx="${outCx.toFixed(1)}" cy="${midY.toFixed(1)}" r="${outBoxR.toFixed(1)}" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.8" />
+    `;
+
+    // Series connecting pipe between tubs
+    if (t < nTrays - 1) {
+      const nextSpX = tx + drawTubW + drawGap + Math.max(6, ballastInPlan * 0.45) - spW / 2;
+      planTubsSvg += `
+        <rect x="${(outCx + outBoxR - 1).toFixed(1)}" y="${(midY - 4).toFixed(1)}" width="${(nextSpX - (outCx + outBoxR - 1)).toFixed(1)}" height="8" fill="#94a3b8" stroke="#1e293b" stroke-width="1" />
+        <line x1="${(tx + drawTubW + 2).toFixed(1)}" y1="${midY.toFixed(1)}" x2="${(tx + drawTubW + drawGap - 3).toFixed(1)}" y2="${midY.toFixed(1)}" stroke="#14532d" stroke-width="1.8" marker-end="url(#rbArr)" />
+      `;
+    }
+  }
+
+  // Inlet pipe (left of Tub 1) & Outlet pipe (right of Last Tub)
+  const planMidY = py + drawTubH / 2;
+  const firstSpX = startX + Math.max(6, ballastInPlan * 0.45) - Math.max(5, Math.min(10, planScale * 0.10)) / 2;
+  const lastOutRight = startX + arrW - ballastOutPlan * 0.48 + outBoxR - 1;
+  const planDimY = py + drawTubH + 20;
+  const legendY = planDimY + 24;
+  const footerY = legendY + 42;
+  const H = footerY + 46;
+
+  // Graphic scale bar (1.0 m exact at planScale)
+  const scaleBarM = planScale < 45 ? 2.0 : 1.0;
+  const scaleBarPx = Math.round(scaleBarM * planScale);
+  const scaleBarX = W - 36 - scaleBarPx;
+  const scaleBarY = legendY + 12;
+
+  const overallDimText = nTrays === 1
+    ? `${tubL.toFixed(1)} m (${Math.round(tubL * 1000)} mm) LENGTH`
+    : `${nTrays}× TUBS IN SERIES — ${totalSeriesM.toFixed(1)} m OVERALL (${nTrays} × ${tubL.toFixed(1)} m + 0.5 m LINKS)`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <defs>
+      <marker id="rbArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#14532d" />
+      </marker>
+      <marker id="dimTick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M 0 2 L 10 5 L 0 8 z" fill="#475569" />
+      </marker>
+    </defs>
+
+    <!-- Title Block -->
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13.5" font-weight="800" fill="#0d241b">
+      CONSTRUCTION DETAIL — HORIZONTAL SUBSURFACE FLOW REED BED (${nTrays}× RIGID TUB)
+    </text>
+    <text x="${W / 2}" y="40" text-anchor="middle" font-size="10" fill="#52635c">
+      ${esc(model.recommended_reed_bed_model)} (${tubL.toFixed(1)} m × ${tubW.toFixed(1)} m × ${tubD.toFixed(2)} m D) · Provided ${model.recommended_reed_bed_provided_m2} m² · Wetted ${wettedD.toFixed(2)} m · HRT ${model.reed_bed_hrt_days} d
+    </text>
+
+    <!-- ================================================================ -->
+    <!-- A. LONGITUDINAL ELEVATION SECTION (TRUE 1:1 SCALE)               -->
+    <!-- ================================================================ -->
+    <text x="36" y="64" font-size="10.5" font-weight="800" fill="#143628">
+      A. LONGITUDINAL ELEVATION SECTION (TRUE SCALE: 1 TUB = ${tubL.toFixed(1)} m L × ${tubD.toFixed(2)} m D)
+    </text>
+
+    <!-- Surrounding ground level (100 mm below rim) -->
+    <line x1="36" y1="${gndY}" x2="${ex}" y2="${gndY}" stroke="#4d7c0f" stroke-width="1.8" />
+    <line x1="${ex + elevW}" y1="${gndY}" x2="${W - 36}" y2="${gndY}" stroke="#4d7c0f" stroke-width="1.8" />
+    <text x="${ex - 8}" y="${ey + 6}" text-anchor="end" font-size="8.2" font-weight="700" fill="#9a3412">Rim ≥ 100 mm proud</text>
+
+    <!-- Outer Rigid Tub Shell -->
+    <rect x="${ex}" y="${ey}" width="${elevW}" height="${elevH}" fill="#e5e7eb" stroke="#1e293b" stroke-width="2.8" />
+    <!-- Wetted aggregate zone -->
+    <rect x="${ex + 2}" y="${waterY}" width="${elevW - 4}" height="${wettedH - 1}" fill="#cbd5e1" />
+    <!-- Inlet & outlet coarse rock zones (50-100 mm) -->
+    <rect x="${ex + 2}" y="${ey + 2}" width="${ballastInW}" height="${elevH - 4}" fill="#d6d3d1" stroke="#b45309" stroke-width="1.2" stroke-dasharray="4,3" />
+    <rect x="${ex + elevW - ballastOutW - 2}" y="${ey + 2}" width="${ballastOutW}" height="${elevH - 4}" fill="#d6d3d1" stroke="#b45309" stroke-width="1.2" stroke-dasharray="4,3" />
+    <!-- Effluent water surface line -->
+    <line x1="${ex + 2}" y1="${waterY}" x2="${ex + elevW - 2}" y2="${waterY}" stroke="#1d4ed8" stroke-width="2" stroke-dasharray="6,3" />
+
+    <!-- Interior Elevation Labels (clearly separated vertically) -->
+    <text x="${ex + elevW / 2 - 4}" y="${waterY - 4}" text-anchor="middle" font-size="8.2" font-weight="700" fill="#1d4ed8">
+      WATER LEVEL (50–100 mm BELOW GRAVEL · WETTED ${wettedD.toFixed(2)} m)
+    </text>
+    <text x="${ex + elevW / 2 - 4}" y="${waterY + Math.round(wettedH * 0.48)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1e293b">
+      CLEAN WASHED 20 mm AGGREGATE (POROSITY 0.40)
+    </text>
+    <text x="${ex + elevW / 2 - 4}" y="${waterY + Math.round(wettedH * 0.78)}" text-anchor="middle" font-size="8.4" fill="#475569">
+      50–100 mm clean rock packed around inlet &amp; outlet zones
+    </text>
+
+    <!-- Inlet pipe (100mm PVC) -->
+    <rect x="${ex - 68}" y="${waterY + 4}" width="${68 + Math.round(ballastInW * 0.55)}" height="9" fill="#94a3b8" stroke="#1e293b" stroke-width="1.1" />
+    <line x1="${ex - 96}" y1="${waterY + 8.5}" x2="${ex - 42}" y2="${waterY + 8.5}" stroke="#14532d" stroke-width="1.8" marker-end="url(#rbArr)" />
+    <text x="${ex - 10}" y="${waterY + 26}" text-anchor="end" font-size="8.5" font-weight="700" fill="#14532d">100 mm INLET</text>
+
+    <!-- 150mm PVC outlet control box with adjustable standpipe -->
+    <rect x="${ex + elevW - Math.round(ballastOutW * 0.72)}" y="${ey - 6}" width="32" height="${elevH + 4}" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.6" />
+    <rect x="${ex + elevW - Math.round(ballastOutW * 0.72) + 12}" y="${waterY}" width="8" height="${ey + elevH - waterY - 8}" fill="#64748b" />
+    <rect x="${ex + elevW - Math.round(ballastOutW * 0.72) + 12}" y="${ey + elevH - 16}" width="${Math.round(ballastOutW * 0.72) + 64}" height="9" fill="#94a3b8" stroke="#1e293b" stroke-width="1.1" />
+    <line x1="${ex + elevW + 14}" y1="${ey + elevH - 11.5}" x2="${ex + elevW + 84}" y2="${ey + elevH - 11.5}" stroke="#14532d" stroke-width="1.8" marker-end="url(#rbArr)" />
+    <text x="${ex + elevW + 12}" y="${ey + elevH - 22}" text-anchor="start" font-size="8.5" font-weight="700" fill="#14532d">TO LAA (100 mm PVC)</text>
+    <text x="${ex + elevW + 12}" y="${ey - 10}" text-anchor="end" font-size="8.5" font-weight="700" fill="#1d4ed8">150 mm PVC OUTLET BOX + STANDPIPE</text>
+
+    <!-- Left Depth Dimension Line (Elevation) -->
+    <line x1="${ex - 116}" y1="${ey}" x2="${ex - 116}" y2="${ey + elevH}" stroke="#475569" stroke-width="1.1" marker-start="url(#dimTick)" marker-end="url(#dimTick)" />
+    <line x1="${ex - 122}" y1="${ey}" x2="${ex - 110}" y2="${ey}" stroke="#475569" stroke-width="1" />
+    <line x1="${ex - 122}" y1="${ey + elevH}" x2="${ex - 110}" y2="${ey + elevH}" stroke="#475569" stroke-width="1" />
+    <rect x="${ex - 146}" y="${ey + elevH / 2 - 9}" width="60" height="18" rx="3" fill="#ffffff" />
+    <text x="${ex - 116}" y="${ey + elevH / 2 + 3}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${tubD.toFixed(2)} m D</text>
+
+    <!-- Crusher dust base -->
+    <rect x="${ex - 12}" y="${ey + elevH}" width="${elevW + 24}" height="${baseH}" fill="#d6d3d1" stroke="#57534e" stroke-width="1" />
+    <text x="${ex + elevW / 2}" y="${ey + elevH + baseH - 3}" text-anchor="middle" font-size="8" font-weight="700" fill="#292524">
+      75–100 mm LEVEL COMPACTED CRUSHER-DUST BASE
+    </text>
+
+    <!-- Elevation Length Dimension Line -->
+    <line x1="${ex}" y1="${elevDimY}" x2="${ex + elevW}" y2="${elevDimY}" stroke="#475569" stroke-width="1.1" marker-start="url(#dimTick)" marker-end="url(#dimTick)" />
+    <line x1="${ex}" y1="${elevDimY - 5}" x2="${ex}" y2="${elevDimY + 5}" stroke="#475569" stroke-width="1" />
+    <line x1="${ex + elevW}" y1="${elevDimY - 5}" x2="${ex + elevW}" y2="${elevDimY + 5}" stroke="#475569" stroke-width="1" />
+    <rect x="${ex + elevW / 2 - 72}" y="${elevDimY - 8}" width="144" height="16" rx="3" fill="#ffffff" />
+    <text x="${ex + elevW / 2}" y="${elevDimY + 3.5}" text-anchor="middle" font-size="8.8" font-weight="700" fill="#334155">
+      ${tubL.toFixed(1)} m (${Math.round(tubL * 1000)} mm) TUB LENGTH
+    </text>
+
+    <!-- ================================================================ -->
+    <!-- B. TRUE-TO-SCALE PLAN VIEW (ALL RIGID TUBS IN SERIES)            -->
+    <!-- ================================================================ -->
+    <text x="36" y="${planHeaderY}" font-size="10.5" font-weight="800" fill="#143628">
+      B. PLAN VIEW — TRUE TO SCALE (${nTrays}× ${tubL.toFixed(1)} m × ${tubW.toFixed(1)} m RIGID TUB${nTrays > 1 ? "S IN SERIES" : ""} · TOTAL ${model.recommended_reed_bed_provided_m2} m²)
+    </text>
+
+    <!-- Inlet pipe entering Tub 1 -->
+    <rect x="${(startX - 54).toFixed(1)}" y="${(planMidY - 4.5).toFixed(1)}" width="${(firstSpX - (startX - 54)).toFixed(1)}" height="9" fill="#94a3b8" stroke="#1e293b" stroke-width="1.1" />
+    <line x1="${(startX - 78).toFixed(1)}" y1="${planMidY.toFixed(1)}" x2="${(startX - 36).toFixed(1)}" y2="${planMidY.toFixed(1)}" stroke="#14532d" stroke-width="1.8" marker-end="url(#rbArr)" />
+    <text x="${(startX - 10).toFixed(1)}" y="${(planMidY + 18).toFixed(1)}" text-anchor="end" font-size="8.4" font-weight="700" fill="#14532d">100 mm INLET</text>
+
+    <!-- Outlet pipe leaving Last Tub -->
+    <rect x="${lastOutRight.toFixed(1)}" y="${(planMidY - 4.5).toFixed(1)}" width="${(startX + arrW + 54 - lastOutRight).toFixed(1)}" height="9" fill="#94a3b8" stroke="#1e293b" stroke-width="1.1" />
+    <line x1="${(startX + arrW + 24).toFixed(1)}" y1="${planMidY.toFixed(1)}" x2="${(startX + arrW + 76).toFixed(1)}" y2="${planMidY.toFixed(1)}" stroke="#14532d" stroke-width="1.8" marker-end="url(#rbArr)" />
+    <text x="${(startX + arrW + 10).toFixed(1)}" y="${(planMidY + 18).toFixed(1)}" text-anchor="start" font-size="8.4" font-weight="700" fill="#14532d">TO LAA (100 mm)</text>
+
+    <!-- All Scaled Rigid Tubs + Series Links -->
+    ${planTubsSvg}
+
+    <!-- Vertical Width Dimension Arrow (left of Tub 1, above inlet pipe) -->
+    <line x1="${(startX - 24).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(startX - 24).toFixed(1)}" y2="${(py + drawTubH).toFixed(1)}" stroke="#475569" stroke-width="1.1" marker-start="url(#dimTick)" marker-end="url(#dimTick)" />
+    <line x1="${(startX - 30).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(startX - 18).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#475569" stroke-width="1" />
+    <line x1="${(startX - 30).toFixed(1)}" y1="${(py + drawTubH).toFixed(1)}" x2="${(startX - 18).toFixed(1)}" y2="${(py + drawTubH).toFixed(1)}" stroke="#475569" stroke-width="1" />
+    <rect x="${(startX - 52).toFixed(1)}" y="${(py + drawTubH * 0.22 - 8).toFixed(1)}" width="56" height="16" rx="3" fill="#ffffff" />
+    <text x="${(startX - 24).toFixed(1)}" y="${(py + drawTubH * 0.22 + 3.5).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${tubW.toFixed(1)} m W</text>
+
+    <!-- Horizontal Overall Length Dimension Arrow (cleanly below plan tubs) -->
+    <line x1="${startX.toFixed(1)}" y1="${planDimY.toFixed(1)}" x2="${(startX + arrW).toFixed(1)}" y2="${planDimY.toFixed(1)}" stroke="#475569" stroke-width="1.1" marker-start="url(#dimTick)" marker-end="url(#dimTick)" />
+    <line x1="${startX.toFixed(1)}" y1="${(planDimY - 5).toFixed(1)}" x2="${startX.toFixed(1)}" y2="${(planDimY + 5).toFixed(1)}" stroke="#475569" stroke-width="1" />
+    <line x1="${(startX + arrW).toFixed(1)}" y1="${(planDimY - 5).toFixed(1)}" x2="${(startX + arrW).toFixed(1)}" y2="${(planDimY + 5).toFixed(1)}" stroke="#475569" stroke-width="1" />
+    <rect x="${(W / 2 - (nTrays === 1 ? 82 : 168)).toFixed(1)}" y="${(planDimY - 8).toFixed(1)}" width="${nTrays === 1 ? 164 : 336}" height="16" rx="3" fill="#ffffff" />
+    <text x="${W / 2}" y="${(planDimY + 3.5).toFixed(1)}" text-anchor="middle" font-size="8.8" font-weight="700" fill="#334155">
+      ${overallDimText}
+    </text>
+
+    <!-- Non-Overlapping Plan Component Legend + Metric Scale Bar -->
+    <rect x="36" y="${legendY - 6}" width="12" height="10" fill="#94a3b8" stroke="#1e293b" stroke-width="1" />
+    <text x="54" y="${legendY + 2}" font-size="8.6" font-weight="700" fill="#334155">100 mm Slotted Inlet Spreader (in 50–100 mm ballast)</text>
+
+    <circle cx="352" cy="${legendY - 1}" r="5.5" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.6" />
+    <text x="364" y="${legendY + 2}" font-size="8.6" font-weight="700" fill="#1d4ed8">150 mm PVC Outlet Box + Rubber Seal</text>
+
+    <circle cx="42" cy="${legendY + 19}" r="5.5" fill="#4ade80" stroke="#166534" stroke-width="1.2" />
+    <text x="54" y="${legendY + 22}" font-size="8.6" font-weight="700" fill="#166534">
+      Dense Macrophytes (4–5/m² ≈ ${plantsPerTray}/tub · ${plantsPerTray * nTrays} total: Lomandra hystrix / Schoenoplectus validus)
+    </text>
+
+    <!-- True Graphic Scale Bar (Plan View) -->
+    <rect x="${scaleBarX}" y="${scaleBarY}" width="${scaleBarPx}" height="6" fill="#0d241b" />
+    <rect x="${scaleBarX + Math.round(scaleBarPx / 2)}" y="${scaleBarY}" width="${scaleBarPx - Math.round(scaleBarPx / 2)}" height="6" fill="#ffffff" stroke="#0d241b" stroke-width="1" />
+    <text x="${scaleBarX + scaleBarPx / 2}" y="${scaleBarY - 3}" text-anchor="middle" font-size="7.8" font-weight="700" fill="#0d241b">PLAN SCALE: ${scaleBarM.toFixed(0)} m</text>
+
+    <!-- Key Spec Footer -->
+    <rect x="36" y="${footerY}" width="${W - 72}" height="38" rx="6" fill="#f7f5ef" stroke="#143628" stroke-width="1" />
+    <text x="48" y="${footerY + 15}" font-size="8.8" font-weight="700" fill="#0d241b">
+      LCC MANDATORY CONTROLS: Rigid impermeable mould only (flexible liners prohibited) · Lip ≥ 100 mm above ground · Backfill walls while filling gravel
+    </text>
+    <text x="48" y="${footerY + 29}" font-size="8.6" fill="#334155">
+      Multiple trays must be connected in SERIES at identical level · Maintain adjustable standpipe for summer aeration (200 mm drop for 2 weeks).
+    </text>
+  </svg>`;
+}
+
+/** 4. Dynamically Dimensioned Cross-Section of ETA Bed (LCC Strategy Appendix B Design 1) */
+export function renderEtaCrossSectionSvg(inp, model, audit) {
+  const W = 740, H = 390;
+  const rootMm = Math.round(Number(inp.root_zone_depth_mm || 300));
+  const gravMm = Math.round(Number(inp.gravel_depth_mm || 300));
+  const totalMm = rootMm + gravMm;
+  const tr = model.trench_layout;
+  const gypNote = audit?.requires_gypsum ? `APPLY GYPSUM @ ${audit.gypsum_rate_kg_m2.toFixed(1)} kg/m² TO RIPPED BASE` : "RIP BASE LEVEL PRIOR TO BACKFILLING";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13.5" font-weight="800" fill="#0d241b">
+      CROSS-SECTION — EVAPOTRANSPIRATION / ABSORPTION (ETA) BED (LCC DESIGN 1)
+    </text>
+    <text x="${W / 2}" y="41" text-anchor="middle" font-size="10" fill="#52635c">
+      ${tr.number_of_trenches}× Bed(s): ${tr.trench_length_m} m Long × ${tr.trench_width_m} m Wide × ${totalMm} mm Deep · ${esc(model.soil_texture_name)} (DLR ${model.max_deep_drainage_mmd} mm/d)
+    </text>
+
+    <!-- Original ground level -->
+    <line x1="26" y1="154" x2="714" y2="154" stroke="#64748b" stroke-width="1.3" stroke-dasharray="7,4" />
+    <text x="698" y="147" text-anchor="end" font-size="8.8" fill="#475569">ORIGINAL CONTOUR</text>
+
+    <!-- Crowned perennial grass topsoil mound -->
+    <path d="M 180 154 Q 370 116 560 154 L 560 200 L 180 200 Z" fill="#d9a973" stroke="#92400e" stroke-width="1.5" />
+    <path d="M 178 154 Q 370 114 562 154" fill="none" stroke="#15803d" stroke-width="4.5" />
+    <text x="370" y="168" text-anchor="middle" font-size="10" font-weight="700" fill="#451a03">FRIABLE TOPSOIL (${rootMm} mm) + MOWED PERENNIAL GRASS</text>
+
+    <!-- Geotextile matting separator -->
+    <path d="M 180 200 L 315 200 Q 370 184 425 200 L 560 200" fill="none" stroke="#0f172a" stroke-width="3.2" />
+
+    <!-- Clean gravel bed -->
+    <rect x="180" y="202" width="380" height="92" fill="#cbd5e1" stroke="#1e293b" stroke-width="2.2" />
+    <text x="370" y="264" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1e293b">
+      CLEAN WASHED 20–50 mm BLUE METAL / GRAVEL (${gravMm} mm DEEP)
+    </text>
+
+    <!-- 100mm slotted PVC pipe (NO geotextile sock!) -->
+    <circle cx="370" cy="218" r="14" fill="#ffffff" stroke="#dc2626" stroke-width="2.5" />
+    <circle cx="370" cy="218" r="6" fill="none" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="2,2" />
+
+    <!-- Inspection shaft -->
+    <rect x="444" y="136" width="16" height="158" fill="#fef08a" stroke="#854d0e" stroke-width="1.5" />
+
+    <!-- Callout leaders -->
+    <line x1="370" y1="204" x2="370" y2="96" stroke="#dc2626" stroke-width="1.2" />
+    <text x="370" y="78" text-anchor="middle" font-size="9.5" font-weight="800" fill="#dc2626">100 mm SLOTTED PVC PIPE (CENTRALLY FED)</text>
+    <text x="370" y="91" text-anchor="middle" font-size="8.8" font-weight="700" fill="#991b1b">NO GEOTEXTILE SOCK ON PIPE (LCC Strategy App. B s3.0)</text>
+
+    <line x1="452" y1="136" x2="510" y2="112" stroke="#854d0e" stroke-width="1.2" />
+    <text x="515" y="114" font-size="9" font-weight="700" fill="#854d0e">100 mm Inspection Shaft</text>
+
+    <line x1="255" y1="200" x2="215" y2="114" stroke="#0f172a" stroke-width="1.2" />
+    <text x="210" y="112" text-anchor="end" font-size="9" font-weight="700" fill="#0f172a">Geotextile Fabric Mat</text>
+
+    <!-- Dimension bars (Left: depths & 2m separation; Bottom: width) -->
+    <line x1="158" y1="154" x2="158" y2="200" stroke="#0f172a" stroke-width="1.3" />
+    <text x="150" y="180" text-anchor="end" font-size="9.5" font-weight="700" fill="#0f172a">${rootMm} mm</text>
+    <line x1="158" y1="202" x2="158" y2="294" stroke="#0f172a" stroke-width="1.3" />
+    <text x="150" y="252" text-anchor="end" font-size="9.5" font-weight="700" fill="#0f172a">${gravMm} mm</text>
+
+    <line x1="28" y1="236" x2="174" y2="236" stroke="#1e40af" stroke-width="1.8" />
+    <text x="100" y="229" text-anchor="middle" font-size="9" font-weight="800" fill="#1e40af">≥ ${tr.trench_separation_m.toFixed(1)} m between beds</text>
+
+    <line x1="180" y1="316" x2="560" y2="316" stroke="#0f172a" stroke-width="1.6" />
+    <line x1="180" y1="308" x2="180" y2="324" stroke="#0f172a" stroke-width="1.6" />
+    <line x1="560" y1="308" x2="560" y2="324" stroke="#0f172a" stroke-width="1.6" />
+    <text x="370" y="332" text-anchor="middle" font-size="10.5" font-weight="800" fill="#0f172a">BED WIDTH = ${tr.trench_width_m.toFixed(1)} m (MAX LENGTH 20.0 m · MAX SLOPE 15%)</text>
+
+    <!-- Base treatment callout -->
+    <rect x="44" y="346" width="652" height="30" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="1.2" />
+    <text x="370" y="365" text-anchor="middle" font-size="9.5" font-weight="800" fill="#92400e">
+      BASE PREPARATION: ${gypNote} · EXCLUDE VEHICLES &amp; LIVESTOCK PERMANENTLY
+    </text>
+  </svg>`;
+}
+
+/** 5. Cross-Section of Sub-Surface Drip Irrigation (LCC Strategy Appendix B s4.0) */
+export function renderSdiCrossSectionSvg(inp, model) {
+  const W = 740, H = 360;
+  const tr = model.trench_layout;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13.5" font-weight="800" fill="#0d241b">
+      CROSS-SECTION — SUB-SURFACE DRIP IRRIGATION (SDI) LATERAL INSTALLATION
+    </text>
+    <text x="${W / 2}" y="41" text-anchor="middle" font-size="10" fill="#52635c">
+      Contiguous Zone: ${tr.trench_length_m} m × ${tr.trench_width_m} m = ${model.required_laa_m2} m² · DIR ${model.max_deep_drainage_mmd} mm/d · Requires Certified Irrigation Design Plan (CIDP)
+    </text>
+
+    <!-- Soil profile layers -->
+    <rect x="54" y="106" width="632" height="82" fill="#d9a973" stroke="#92400e" stroke-width="1.4" />
+    <rect x="54" y="188" width="632" height="84" fill="#cbd5e1" stroke="#475569" stroke-width="1.4" />
+    <line x1="54" y1="106" x2="686" y2="106" stroke="#15803d" stroke-width="5" />
+    <text x="370" y="96" text-anchor="middle" font-size="10" font-weight="800" fill="#15803d">MOWED PERENNIAL GRASS COVER (ROOT ZONE EVAPOTRANSPIRATION)</text>
+
+    <!-- Pressure compensating dripper laterals at 150 mm depth, 1.0 m spacing -->
+    ${[160, 300, 440, 580].map((x) => `
+      <ellipse cx="${x}" cy="154" rx="34" ry="20" fill="#bae6fd" opacity="0.65" />
+      <circle cx="${x}" cy="154" r="8" fill="#0284c7" stroke="#0c4a6e" stroke-width="2" />
+    `).join("")}
+
+    <line x1="300" y1="146" x2="300" y2="106" stroke="#0c4a6e" stroke-width="1.3" stroke-dasharray="3,2" />
+    <text x="308" y="130" font-size="9" font-weight="800" fill="#0c4a6e">100–150 mm Burial Depth</text>
+
+    <line x1="300" y1="210" x2="440" y2="210" stroke="#0f172a" stroke-width="1.6" />
+    <text x="370" y="226" text-anchor="middle" font-size="9.5" font-weight="800" fill="#0f172a">LATERAL SPACING: 0.6–1.0 m (ROOT-RETARDANT PRESSURE-COMPENSATING DRIP LINE)</text>
+    <text x="370" y="252" text-anchor="middle" font-size="9.5" fill="#334155">SUBSOIL HORIZON (${esc(model.soil_texture_name)}) — TOPSOIL ROOT ZONE = 300 mm</text>
+
+    <rect x="54" y="290" width="632" height="50" rx="6" fill="#ecfeff" stroke="#0e7490" stroke-width="1.2" />
+    <text x="68" y="310" font-size="9" font-weight="800" fill="#155e75">
+      LCC MANDATORY IRRIGATION CONTROLS (Appendix B s4.0, C &amp; D): Tertiary disinfected effluent required · 1,800 L Pump Well + Alarm
+    </text>
+    <text x="68" y="328" font-size="8.8" fill="#155e75">
+      Above-ground 130 µm disc filter + liquid-filled pressure gauges · Scour flush velocity ≥ 0.8 m/s · Quarterly servicing &amp; Council report within 7 days.
+    </text>
+  </svg>`;
+}
+
+/** 6. Browser-Rendered GDA2020 / MGA Zone 56 GIS Site Location & Watercourse Buffer Map (SVG) */
+export function renderGisSiteMapSvg(inp, spatial) {
+  const W = 820, H = 560;
+  const mapX = 56, mapY = 44, mapW = 738, mapH = 408;
+
+  if (!spatial || !spatial.parcel_geojson) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#f8fafc; border:1px solid #cbd5e1; font-family:Inter,sans-serif;">
+      <text x="${W / 2}" y="${H / 2 - 10}" text-anchor="middle" font-size="14" font-weight="800" fill="#143628">
+        SITE LOCATION MAP — Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)} (${esc(inp.site_address)})
+      </text>
+      <text x="${W / 2}" y="${H / 2 + 16}" text-anchor="middle" font-size="11" fill="#52635c">
+        Click "Fetch Live NSW Cadastre &amp; Overlays" in Tab 1 to embed the live GDA2020 / MGA Zone 56 cadastre &amp; watercourse map.
+      </text>
+    </svg>`;
+  }
+
+  // Extract subject parcel bbox (WGS84 lon/lat) & project linearly using local metres scale around centroid
+  const coordsOf = (geom) => {
+    if (!geom) return [];
+    if (geom.type === "Polygon") return geom.coordinates;
+    if (geom.type === "MultiPolygon") return geom.coordinates.flat();
+    if (geom.type === "LineString") return [geom.coordinates];
+    if (geom.type === "MultiLineString") return geom.coordinates;
+    return [];
+  };
+
+  const subjRings = coordsOf(spatial.parcel_geojson.geometry);
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const ring of subjRings) {
+    for (const [lon, lat] of ring) {
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+  }
+  const midLat = (minLat + maxLat) / 2;
+  const mPerDegLat = 111132;
+  const mPerDegLon = 111320 * Math.cos((midLat * Math.PI) / 180);
+
+  const spanLonM = Math.max(80, (maxLon - minLon) * mPerDegLon);
+  const spanLatM = Math.max(80, (maxLat - minLat) * mPerDegLat);
+  const padM = Math.max(spanLonM, spanLatM) * 0.35;
+
+  const viewMinLon = minLon - padM / mPerDegLon;
+  const viewMaxLon = maxLon + padM / mPerDegLon;
+  const viewMinLat = minLat - padM / mPerDegLat;
+  const viewMaxLat = maxLat + padM / mPerDegLat;
+
+  const viewWM = (viewMaxLon - viewMinLon) * mPerDegLon;
+  const viewHM = (viewMaxLat - viewMinLat) * mPerDegLat;
+  const scale = Math.min(mapW / viewWM, mapH / viewHM); // px per metre
+  const usedW = viewWM * scale;
+  const usedH = viewHM * scale;
+  const offX = mapX + (mapW - usedW) / 2;
+  const offY = mapY + (mapH - usedH) / 2;
+
+  const proj = (lon, lat) => [
+    offX + (lon - viewMinLon) * mPerDegLon * scale,
+    offY + (viewMaxLat - lat) * mPerDegLat * scale,
+  ];
+
+  const polyPath = (rings) =>
+    rings
+      .map((ring) =>
+        ring
+          .map(([lo, la], idx) => {
+            const [x, y] = proj(lo, la);
+            return `${idx === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(" ") + " Z",
+      )
+      .join(" ");
+
+  const linePath = (lines) =>
+    lines
+      .map((line) =>
+        line
+          .map(([lo, la], idx) => {
+            const [x, y] = proj(lo, la);
+            return `${idx === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(" "),
+      )
+      .join(" ");
+
+  // Neighbouring parcels
+  let nbSvg = "";
+  for (const nf of spatial.neighbour_parcels_geojson || []) {
+    const rings = coordsOf(nf.geometry);
+    if (!rings.length) continue;
+    nbSvg += `<path d="${polyPath(rings)}" fill="#ffffff" stroke="#94a3b8" stroke-width="0.9" />`;
+    const r0 = rings[0];
+    let sx = 0, sy = 0;
+    for (const [lo, la] of r0) { sx += lo; sy += la; }
+    const [lx, ly] = proj(sx / r0.length, sy / r0.length);
+    if (lx > mapX + 20 && lx < mapX + mapW - 20 && ly > mapY + 14 && ly < mapY + mapH - 14) {
+      const p = nf.properties || {};
+      nbSvg += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="8" fill="#475569">Lot ${esc(p.lotnumber || "")} ${esc(p.planlabel || "")}</text>`;
+    }
+  }
+
+  // Contours
+  let contSvg = "";
+  for (const cf of spatial.contours_geojson || []) {
+    const lines = coordsOf(cf.geometry);
+    if (lines.length) contSvg += `<path d="${linePath(lines)}" fill="none" stroke="#cbd5e1" stroke-width="0.7" />`;
+  }
+
+  // Watercourses + 40 m gully buffer halo (scaled cleanly in pixels = 40 * scale * 2 stroke width!)
+  const buf40StrokePx = Math.max(4, Math.min(60, 80 * scale));
+  let wcBufSvg = "", wcLineSvg = "";
+  for (const wf of spatial.watercourses_geojson || []) {
+    const lines = coordsOf(wf.geometry);
+    if (!lines.length) continue;
+    const d = linePath(lines);
+    wcBufSvg += `<path d="${d}" fill="none" stroke="#93c5fd" stroke-width="${buf40StrokePx.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" />`;
+    wcLineSvg += `<path d="${d}" fill="none" stroke="#1d4ed8" stroke-width="1.8" stroke-linecap="round" />`;
+  }
+
+  // Subject parcel + centroid pill
+  const subjD = polyPath(subjRings);
+  const [cx, cy] = proj(spatial.centroid_lon || (minLon + maxLon) / 2, spatial.centroid_lat || (minLat + maxLat) / 2);
+
+  // Nice metric scale bar
+  const targetM = (mapW / scale) * 0.22;
+  const barM = [20, 50, 100, 200, 250, 500, 1000].reduce((a, b) => (Math.abs(b - targetM) < Math.abs(a - targetM) ? b : a));
+  const barPx = barM * scale;
+
+  const zoningStr = (spatial.land_zoning || []).join(", ") || "Verify LEP";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
+    <defs>
+      <clipPath id="gisClip"><rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" /></clipPath>
+    </defs>
+
+    <text x="${W / 2}" y="26" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
+      SITE LOCATION &amp; ENVIRONMENTAL CONSTRAINTS MAP — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
+    </text>
+
+    <rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" fill="#f8fafc" stroke="#1e293b" stroke-width="1.4" />
+    <g clip-path="url(#gisClip)">
+      ${nbSvg}
+      ${contSvg}
+      <path d="${subjD}" fill="#fecaca" fill-opacity="0.62" stroke="#991b1b" stroke-width="2.4" />
+      ${wcBufSvg}
+      ${wcLineSvg}
+      <rect x="${(cx - 64).toFixed(1)}" y="${(cy - 22).toFixed(1)}" width="128" height="44" rx="6" fill="rgba(255,255,255,0.92)" stroke="#991b1b" stroke-width="1.2" />
+      <text x="${cx.toFixed(1)}" y="${(cy - 7).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#7f1d1d">SUBJECT LOT</text>
+      <text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#7f1d1d">Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}</text>
+      <text x="${cx.toFixed(1)}" y="${(cy + 17).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#7f1d1d">(${(spatial.parcel_area_ha || inp.block_size_m2 / 10000).toFixed(2)} ha)</text>
+    </g>
+
+    <!-- Legend box -->
+    <rect x="${mapX + mapW - 198}" y="${mapY + 10}" width="188" height="92" rx="6" fill="rgba(255,255,255,0.95)" stroke="#cbd5e1" stroke-width="1" />
+    <rect x="${mapX + mapW - 188}" y="${mapY + 20}" width="16" height="10" fill="#fecaca" stroke="#991b1b" stroke-width="1.5" />
+    <text x="${mapX + mapW - 166}" y="${mapY + 29}" font-size="8.8" fill="#1e293b">Subject Lot (${esc(inp.lot_number)}/${esc(inp.plan_label)})</text>
+    <rect x="${mapX + mapW - 188}" y="${mapY + 37}" width="16" height="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1" />
+    <text x="${mapX + mapW - 166}" y="${mapY + 46}" font-size="8.8" fill="#1e293b">Adjoining Cadastre</text>
+    <line x1="${mapX + mapW - 188}" y1="${mapY + 59}" x2="${mapX + mapW - 172}" y2="${mapY + 59}" stroke="#1d4ed8" stroke-width="2" />
+    <text x="${mapX + mapW - 166}" y="${mapY + 63}" font-size="8.8" fill="#1e293b">Mapped Watercourse</text>
+    <rect x="${mapX + mapW - 188}" y="${mapY + 71}" width="16" height="10" fill="#93c5fd" opacity="0.45" stroke="#3b82f6" stroke-dasharray="2,2" />
+    <text x="${mapX + mapW - 166}" y="${mapY + 80}" font-size="8.8" fill="#1e293b">40 m Gully Buffer Halo</text>
+    <line x1="${mapX + mapW - 188}" y1="${mapY + 93}" x2="${mapX + mapW - 172}" y2="${mapY + 93}" stroke="#cbd5e1" stroke-width="1.3" />
+    <text x="${mapX + mapW - 166}" y="${mapY + 96}" font-size="8.8" fill="#1e293b">NSW Elevation Contours</text>
+
+    <!-- Scale bar -->
+    <g transform="translate(${mapX + 16}, ${mapY + mapH - 28})">
+      <rect x="0" y="6" width="${(barPx / 2).toFixed(1)}" height="8" fill="#1e293b" stroke="#1e293b" />
+      <rect x="${(barPx / 2).toFixed(1)}" y="6" width="${(barPx / 2).toFixed(1)}" height="8" fill="#ffffff" stroke="#1e293b" />
+      <text x="0" y="3" font-size="8.5" font-weight="700" fill="#0f172a">0</text>
+      <text x="${(barPx / 2).toFixed(1)}" y="3" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0f172a">${barM / 2}</text>
+      <text x="${barPx.toFixed(1)}" y="3" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0f172a">${barM} m</text>
+    </g>
+
+    <!-- North arrow -->
+    <g transform="translate(${mapX + mapW - 34}, ${mapY + mapH - 54})">
+      <line x1="0" y1="34" x2="0" y2="8" stroke="#0f172a" stroke-width="2.4" />
+      <polygon points="0,0 -6,12 6,12" fill="#0f172a" />
+      <text x="0" y="-4" text-anchor="middle" font-size="11" font-weight="800" fill="#0f172a">N</text>
+    </g>
+
+    <!-- Formal Title Block Footer -->
+    <rect x="${mapX}" y="468" width="${mapW}" height="74" fill="#f7f5ef" stroke="#143628" stroke-width="1.3" />
+    <line x1="${mapX + 275}" y1="468" x2="${mapX + 275}" y2="542" stroke="#143628" stroke-width="0.9" />
+    <line x1="${mapX + 520}" y1="468" x2="${mapX + 520}" y2="542" stroke="#143628" stroke-width="0.9" />
+
+    <text x="${mapX + 10}" y="485" font-size="8.5" font-weight="800" fill="#143628">PROJECT &amp; SITE DETAILS</text>
+    <text x="${mapX + 10}" y="502" font-size="8.5" fill="#1e293b">Site: ${esc(inp.site_address)}</text>
+    <text x="${mapX + 10}" y="517" font-size="8.5" fill="#1e293b">Lot/DP: Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}  |  LGA: ${esc(inp.lga)}</text>
+    <text x="${mapX + 10}" y="532" font-size="8.2" fill="#334155">Applicant: ${esc(inp.applicant_name)}  |  Zone: ${esc(zoningStr)}</text>
+
+    <text x="${mapX + 285}" y="485" font-size="8.5" font-weight="800" fill="#143628">SPATIAL METADATA &amp; DATUM</text>
+    <text x="${mapX + 285}" y="502" font-size="8.3" fill="#1e293b">Datum: GDA2020 / MGA Zone 56 (EPSG:7856)</text>
+    <text x="${mapX + 285}" y="517" font-size="8.0" fill="#334155">Centroid: E ${Math.round(spatial.centroid_easting_mga56 || 0)}, N ${Math.round(spatial.centroid_northing_mga56 || 0)}</text>
+    <text x="${mapX + 285}" y="532" font-size="7.6" fill="#475569">Source: NSW Spatial Services &amp; Planning Portal</text>
+
+    <text x="${mapX + 530}" y="485" font-size="8.5" font-weight="800" fill="#143628">PREPARED BY</text>
+    <text x="${mapX + 530}" y="502" font-size="8.3" fill="#1e293b">${esc(inp.consultant?.name || "Field To Forest")}</text>
+    <text x="${mapX + 530}" y="517" font-size="8.3" fill="#1e293b">Ref: ${esc(inp.project_ref)}  |  Date: ${esc(inp.site_eval?.assessment_date || "")}</text>
+    <text x="${mapX + 530}" y="532" font-size="8.3" font-weight="800" fill="#991b1b">Drawing: OSSM-GIS-01  |  S68 SUBMISSION</text>
+  </svg>`;
+}
+
+/** 7. Commercial Grease Arrestor Cross-Section (AS/NZS 3500.2 & NSW Liquid Trade Waste) */
+export function renderGreaseArrestorCrossSectionSvg(model) {
+  const W = 740, H = 370;
+  const capL = model.grease_arrestor_min_l || 1000;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <defs>
+      <marker id="grArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="#b45309" />
+      </marker>
+    </defs>
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
+      CROSS-SECTION — ${capL} L COMMERCIAL GREASE ARRESTOR (AS/NZS 3500.2)
+    </text>
+    <text x="${W / 2}" y="41" text-anchor="middle" font-size="9.8" fill="#52635c">
+      Upstream of Primary Septic Tank for Commercial Kitchen / Food Processing · Pump-Out Every 3–6 Months
+    </text>
+
+    <!-- Ground line -->
+    <line x1="26" y1="80" x2="488" y2="80" stroke="#15803d" stroke-width="2" stroke-dasharray="8,4" />
+    <text x="34" y="72" font-size="8.8" font-weight="700" fill="#15803d">FINISHED SURFACE (GAS-TIGHT TRAFFICABLE LID)</text>
+
+    <!-- Crusher dust base -->
+    <rect x="80" y="302" width="350" height="18" fill="#d6d3d1" stroke="#57534e" stroke-width="1.2" />
+    <text x="255" y="315" text-anchor="middle" font-size="8.8" font-weight="700" fill="#292524">100 mm LEVEL COMPACTED BEDDING PAD</text>
+
+    <!-- Tank shell + airtight lid -->
+    <rect x="86" y="88" width="338" height="214" fill="#eff6ff" stroke="#1e293b" stroke-width="3" />
+    <rect x="82" y="80" width="346" height="10" fill="#64748b" stroke="#1e293b" stroke-width="1.4" />
+
+    <!-- Aqueous layer + trapped FOG grease crust + settled food solids -->
+    <rect x="88" y="146" width="334" height="154" fill="#bae6fd" />
+    <rect x="88" y="128" width="248" height="36" fill="#f59e0b" stroke="#92400e" stroke-width="1.2" />
+    <text x="212" y="150" text-anchor="middle" font-size="9.5" font-weight="800" fill="#451a03">TRAPPED FOG (FATS, OILS &amp; GREASE)</text>
+    <rect x="88" y="266" width="334" height="34" fill="#a8a29e" stroke="#57534e" stroke-width="1" />
+    <text x="212" y="287" text-anchor="middle" font-size="9.2" font-weight="700" fill="#1c1917">SETTLED FOOD SOLIDS SUMP</text>
+    <text x="212" y="218" text-anchor="middle" font-size="9.5" font-weight="700" fill="#0c4a6e">CLARIFIED MIDDLE WATER ZONE</text>
+
+    <!-- Internal baffle wall -->
+    <rect x="336" y="102" width="8" height="158" fill="#334155" />
+
+    <!-- Inlet pipe from commercial kitchen -->
+    <rect x="40" y="114" width="86" height="12" fill="#94a3b8" stroke="#1e293b" stroke-width="1.2" />
+    <rect x="114" y="114" width="12" height="72" fill="#94a3b8" stroke="#1e293b" stroke-width="1.2" />
+    <line x1="26" y1="120" x2="64" y2="120" stroke="#b45309" stroke-width="2" marker-end="url(#grArr)" />
+    <text x="34" y="108" font-size="8.6" font-weight="700" fill="#9a3412">KITCHEN WASTE</text>
+
+    <!-- Submerged outlet tee to septic tank -->
+    <rect x="372" y="132" width="102" height="12" fill="#38bdf8" stroke="#0369a1" stroke-width="1.2" />
+    <rect x="372" y="132" width="12" height="114" fill="#38bdf8" stroke="#0369a1" stroke-width="1.2" />
+    <line x1="432" y1="138" x2="480" y2="138" stroke="#b45309" stroke-width="2" marker-end="url(#grArr)" />
+    <text x="424" y="124" font-size="8.6" font-weight="700" fill="#0369a1">TO SEPTIC TANK</text>
+
+    <!-- Spec Legend -->
+    <rect x="500" y="80" width="220" height="240" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.2" />
+    <text x="514" y="102" font-size="10" font-weight="800" fill="#92400e">MANDATORY FOG CONTROLS</text>
+    <text x="514" y="124" font-size="8.8" fill="#1e293b">• Capacity: ${capL} L (min. 1,000 L)</text>
+    <text x="514" y="144" font-size="8.8" fill="#1e293b">• Kitchen/food sinks ONLY (no toilets)</text>
+    <text x="514" y="164" font-size="8.8" fill="#1e293b">• Fit ≤ 3 mm sink basket strainers</text>
+    <text x="514" y="184" font-size="8.8" fill="#1e293b">• Vent to atmosphere per AS/NZS 3500</text>
+    <text x="514" y="204" font-size="8.8" fill="#1e293b">• Direct vacuum-tanker access</text>
+    <text x="514" y="224" font-size="8.8" font-weight="700" fill="#9a3412">• Pump out every 3–6 months</text>
+    <text x="514" y="242" font-size="8.4" fill="#475569">  (NSW EPA licensed liquid waste)</text>
+    <text x="514" y="264" font-size="8.4" fill="#475569">• NO enzyme/emulsifier degreasers</text>
+    <text x="514" y="282" font-size="8.4" fill="#475569">• Keep pump-out dockets for Council</text>
+
+    <text x="${W / 2}" y="352" text-anchor="middle" font-size="9.2" fill="#52635c">
+      NOT TO SCALE — Install &amp; vent strictly in accordance with AS/NZS 3500.2 &amp; NSW Liquid Trade Waste Guidelines
+    </text>
+  </svg>`;
+}
