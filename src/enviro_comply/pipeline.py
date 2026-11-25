@@ -54,7 +54,7 @@ def run_ossm_pipeline(
     cad_dxf = output_dir / f"{slug}_Layout_Plan.dxf"
     cad_png = output_dir / f"{slug}_Layout_Plan.png"
     cad_pdf = output_dir / f"{slug}_Layout_Plan.pdf"
-    generate_ossm_cad_plan(inp, model, cad_dxf, cad_png, cad_pdf)
+    generate_ossm_cad_plan(inp, model, cad_dxf, cad_png, cad_pdf, spatial_data=spatial.model_dump())
 
     # 5b. Programmatic Engineering Cross-Sections & Treatment Train
     diag_dir = output_dir / "diagrams"

@@ -612,8 +612,10 @@ export function renderSdiCrossSectionSvg(inp, model) {
   </svg>`;
 }
 
-/** 6. Browser-Rendered GDA2020 / MGA Zone 56 GIS Site Location & Watercourse Buffer Map (SVG) */
-export function renderGisSiteMapSvg(inp, spatial) {
+/** 6. Browser-Rendered GDA2020 / MGA Zone 56 GIS Site Location, Pin & Watercourse Buffer Map (SVG) */
+export function renderGisSiteMapSvg(inp, spatial, options = {}) {
+  const drawingCode = options.drawingCode || "OSSM-GIS-01";
+  const submissionLabel = options.submissionLabel || "S68 SUBMISSION";
   const W = 820, H = 560;
   const mapX = 56, mapY = 44, mapW = 738, mapH = 408;
 
@@ -623,7 +625,7 @@ export function renderGisSiteMapSvg(inp, spatial) {
         SITE LOCATION MAP — Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)} (${esc(inp.site_address)})
       </text>
       <text x="${W / 2}" y="${H / 2 + 16}" text-anchor="middle" font-size="11" fill="#52635c">
-        Click "Fetch Live NSW Cadastre &amp; Overlays" in Tab 1 to embed the live GDA2020 / MGA Zone 56 cadastre &amp; watercourse map.
+        Live NSW Spatial Services cadastre &amp; watercourse map pending spatial lookup (${esc(drawingCode)}).
       </text>
     </svg>`;
   }
@@ -721,16 +723,58 @@ export function renderGisSiteMapSvg(inp, spatial) {
     if (lines.length) contSvg += `<path d="${linePath(lines)}" fill="none" stroke="#cbd5e1" stroke-width="0.7" />`;
   }
 
-  // Watercourses + 40 m gully buffer halo (scaled cleanly in pixels = 40 * scale * 2 stroke width!)
-  const buf40StrokePx = Math.max(4, Math.min(60, 80 * scale));
-  let wcBufSvg = "", wcLineSvg = "";
+  // Watercourses + 40 m gully & 100 m perennial watercourse buffer halos
+  const buf40StrokePx = Math.max(4, Math.min(55, 80 * scale));
+  const buf100StrokePx = Math.max(8, Math.min(110, 200 * scale));
+  let wcBuf100Svg = "", wcBufSvg = "", wcLineSvg = "";
   for (const wf of spatial.watercourses_geojson || []) {
     const lines = coordsOf(wf.geometry);
     if (!lines.length) continue;
     const d = linePath(lines);
-    wcBufSvg += `<path d="${d}" fill="none" stroke="#93c5fd" stroke-width="${buf40StrokePx.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" />`;
+    wcBuf100Svg += `<path d="${d}" fill="none" stroke="#bfdbfe" stroke-width="${buf100StrokePx.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.22" />`;
+    wcBufSvg += `<path d="${d}" fill="none" stroke="#60a5fa" stroke-width="${buf40StrokePx.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.34" />`;
     wcLineSvg += `<path d="${d}" fill="none" stroke="#1d4ed8" stroke-width="1.8" stroke-linecap="round" />`;
   }
+
+  // Dropped GDA2020 Field Pins (plotted directly on the GIS Site Location Map!)
+  const pinPalette = {
+    dwelling: "#0f172a",
+    septic_tank: "#9a3412",
+    reed_bed: "#166534",
+    eta_bed: "#1d4ed8",
+    reserve_laa: "#0f766e",
+    borehole: "#ca8a04",
+  };
+  let pinsSvg = "";
+  let plottedPinsCount = 0;
+  for (const pin of inp.field_pins || []) {
+    const pLat = pin.latitude != null ? Number(pin.latitude) : (pin.northing_mga56 && Math.abs(pin.northing_mga56) <= 90 ? Number(pin.northing_mga56) : null);
+    const pLon = pin.longitude != null ? Number(pin.longitude) : (pin.easting_mga56 && Math.abs(pin.easting_mga56) <= 180 ? Number(pin.easting_mga56) : null);
+    if (pLat == null || pLon == null) continue;
+    const [px, py] = proj(pLon, pLat);
+    if (px < mapX + 4 || px > mapX + mapW - 4 || py < mapY + 4 || py > mapY + mapH - 4) continue;
+    plottedPinsCount++;
+    const col = pinPalette[pin.feature_type] || "#b45309";
+    const lbl = esc(pin.label || pin.feature_type);
+    pinsSvg += `
+      <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.2" fill="${col}" stroke="#ffffff" stroke-width="1.6" />
+      <rect x="${(px + 7).toFixed(1)}" y="${(py - 8).toFixed(1)}" width="${Math.max(28, lbl.length * 5.2 + 8).toFixed(1)}" height="14" rx="3" fill="rgba(255,255,255,0.92)" stroke="${col}" stroke-width="0.8" />
+      <text x="${(px + 11).toFixed(1)}" y="${(py + 2).toFixed(1)}" font-size="7.6" font-weight="800" fill="${col}">${lbl}</text>
+    `;
+  }
+
+  // Triggered statutory overlay ribbon (top-left of map frame)
+  const activeOverlays = [];
+  if (spatial.drinking_water_catchment) activeOverlays.push("ROUS WATER");
+  if (spatial.flood_planning) activeOverlays.push("FLOOD");
+  if (spatial.bushfire_prone_land?.length) activeOverlays.push("BUSHFIRE");
+  if (spatial.acid_sulfate_soils?.length) activeOverlays.push("ASS");
+  if (spatial.riparian_land || spatial.wetlands) activeOverlays.push("RIPARIAN");
+  if (spatial.terrestrial_biodiversity) activeOverlays.push("BIODIVERSITY");
+  const overlayBannerSvg = activeOverlays.length
+    ? `<rect x="${mapX + 10}" y="${mapY + 10}" width="${Math.min(440, 128 + activeOverlays.join(' · ').length * 5.3)}" height="22" rx="5" fill="rgba(254,243,199,0.95)" stroke="#b45309" stroke-width="1" />
+       <text x="${mapX + 18}" y="${mapY + 24}" font-size="8.2" font-weight="800" fill="#92400e">ACTIVE OVERLAYS: ${esc(activeOverlays.join(" · "))}</text>`
+    : "";
 
   // Subject parcel + centroid pill
   const subjD = polyPath(subjRings);
@@ -742,6 +786,7 @@ export function renderGisSiteMapSvg(inp, spatial) {
   const barPx = barM * scale;
 
   const zoningStr = (spatial.land_zoning || []).join(", ") || "Verify LEP";
+  const legendH = plottedPinsCount > 0 ? 124 : 108;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
     <defs>
@@ -756,27 +801,32 @@ export function renderGisSiteMapSvg(inp, spatial) {
     <g clip-path="url(#gisClip)">
       ${nbSvg}
       ${contSvg}
-      <path d="${subjD}" fill="#fecaca" fill-opacity="0.62" stroke="#991b1b" stroke-width="2.4" />
+      <path d="${subjD}" fill="#fecaca" fill-opacity="0.56" stroke="#991b1b" stroke-width="2.4" />
+      ${wcBuf100Svg}
       ${wcBufSvg}
       ${wcLineSvg}
-      <rect x="${(cx - 64).toFixed(1)}" y="${(cy - 22).toFixed(1)}" width="128" height="44" rx="6" fill="rgba(255,255,255,0.92)" stroke="#991b1b" stroke-width="1.2" />
+      ${plottedPinsCount === 0 ? `<rect x="${(cx - 64).toFixed(1)}" y="${(cy - 22).toFixed(1)}" width="128" height="44" rx="6" fill="rgba(255,255,255,0.92)" stroke="#991b1b" stroke-width="1.2" />
       <text x="${cx.toFixed(1)}" y="${(cy - 7).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#7f1d1d">SUBJECT LOT</text>
       <text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#7f1d1d">Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}</text>
-      <text x="${cx.toFixed(1)}" y="${(cy + 17).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#7f1d1d">(${(spatial.parcel_area_ha || inp.block_size_m2 / 10000).toFixed(2)} ha)</text>
+      <text x="${cx.toFixed(1)}" y="${(cy + 17).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#7f1d1d">(${(spatial.parcel_area_ha || inp.block_size_m2 / 10000).toFixed(2)} ha)</text>` : ""}
+      ${pinsSvg}
     </g>
+    ${overlayBannerSvg}
 
     <!-- Legend box -->
-    <rect x="${mapX + mapW - 198}" y="${mapY + 10}" width="188" height="92" rx="6" fill="rgba(255,255,255,0.95)" stroke="#cbd5e1" stroke-width="1" />
-    <rect x="${mapX + mapW - 188}" y="${mapY + 20}" width="16" height="10" fill="#fecaca" stroke="#991b1b" stroke-width="1.5" />
-    <text x="${mapX + mapW - 166}" y="${mapY + 29}" font-size="8.8" fill="#1e293b">Subject Lot (${esc(inp.lot_number)}/${esc(inp.plan_label)})</text>
-    <rect x="${mapX + mapW - 188}" y="${mapY + 37}" width="16" height="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1" />
-    <text x="${mapX + mapW - 166}" y="${mapY + 46}" font-size="8.8" fill="#1e293b">Adjoining Cadastre</text>
-    <line x1="${mapX + mapW - 188}" y1="${mapY + 59}" x2="${mapX + mapW - 172}" y2="${mapY + 59}" stroke="#1d4ed8" stroke-width="2" />
-    <text x="${mapX + mapW - 166}" y="${mapY + 63}" font-size="8.8" fill="#1e293b">Mapped Watercourse</text>
-    <rect x="${mapX + mapW - 188}" y="${mapY + 71}" width="16" height="10" fill="#93c5fd" opacity="0.45" stroke="#3b82f6" stroke-dasharray="2,2" />
-    <text x="${mapX + mapW - 166}" y="${mapY + 80}" font-size="8.8" fill="#1e293b">40 m Gully Buffer Halo</text>
-    <line x1="${mapX + mapW - 188}" y1="${mapY + 93}" x2="${mapX + mapW - 172}" y2="${mapY + 93}" stroke="#cbd5e1" stroke-width="1.3" />
-    <text x="${mapX + mapW - 166}" y="${mapY + 96}" font-size="8.8" fill="#1e293b">NSW Elevation Contours</text>
+    <rect x="${mapX + mapW - 204}" y="${mapY + 10}" width="194" height="${legendH}" rx="6" fill="rgba(255,255,255,0.95)" stroke="#cbd5e1" stroke-width="1" />
+    <rect x="${mapX + mapW - 194}" y="${mapY + 20}" width="16" height="10" fill="#fecaca" stroke="#991b1b" stroke-width="1.5" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 29}" font-size="8.6" fill="#1e293b">Subject Lot (${esc(inp.lot_number)}/${esc(inp.plan_label)})</text>
+    <rect x="${mapX + mapW - 194}" y="${mapY + 36}" width="16" height="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 45}" font-size="8.6" fill="#1e293b">Adjoining Cadastre</text>
+    <line x1="${mapX + mapW - 194}" y1="${mapY + 57}" x2="${mapX + mapW - 178}" y2="${mapY + 57}" stroke="#1d4ed8" stroke-width="2" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 61}" font-size="8.6" fill="#1e293b">Mapped Watercourse</text>
+    <rect x="${mapX + mapW - 194}" y="${mapY + 69}" width="16" height="10" fill="#60a5fa" opacity="0.45" stroke="#2563eb" stroke-dasharray="2,2" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 78}" font-size="8.6" fill="#1e293b">40 m Gully / 100 m Stream Halo</text>
+    <line x1="${mapX + mapW - 194}" y1="${mapY + 91}" x2="${mapX + mapW - 178}" y2="${mapY + 91}" stroke="#cbd5e1" stroke-width="1.3" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 94}" font-size="8.6" fill="#1e293b">NSW Elevation Contours</text>
+    ${plottedPinsCount > 0 ? `<circle cx="${mapX + mapW - 186}" cy="${mapY + 109}" r="4.5" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.2" />
+    <text x="${mapX + mapW - 172}" y="${mapY + 112}" font-size="8.6" font-weight="700" fill="#0f172a">GPS Field Pins (${plottedPinsCount})</text>` : ""}
 
     <!-- Scale bar -->
     <g transform="translate(${mapX + 16}, ${mapY + mapH - 28})">
@@ -812,7 +862,167 @@ export function renderGisSiteMapSvg(inp, spatial) {
     <text x="${mapX + 530}" y="485" font-size="8.5" font-weight="800" fill="#143628">PREPARED BY</text>
     <text x="${mapX + 530}" y="502" font-size="8.3" fill="#1e293b">${esc(inp.consultant?.name || "Field To Forest")}</text>
     <text x="${mapX + 530}" y="517" font-size="8.3" fill="#1e293b">Ref: ${esc(inp.project_ref)}  |  Date: ${esc(inp.site_eval?.assessment_date || "")}</text>
-    <text x="${mapX + 530}" y="532" font-size="8.3" font-weight="800" fill="#991b1b">Drawing: OSSM-GIS-01  |  S68 SUBMISSION</text>
+    <text x="${mapX + 530}" y="532" font-size="8.3" font-weight="800" fill="#991b1b">Drawing: ${esc(drawingCode)}  |  ${esc(submissionLabel)}</text>
+  </svg>`;
+}
+
+/** 8. LAA Sizing Drivers & Alstonville 1970-1991 Monthly Water Balance Chart (SVG) */
+export function renderSizingAndWaterBalanceSvg(inp, model) {
+  const W = 760, H = 310;
+  const drivers = [
+    { key: "Hydraulic", label: "Hydraulic (7,670-d)", val: Number(model.hydraulic_area_m2 || 0) },
+    { key: "Nitrogen", label: "Nitrogen Balance", val: Number(model.nitrogen_area_m2 || 0) },
+    { key: "Phosphorus", label: "Phosphorus (50-yr)", val: Number(model.phosphorus_area_m2 || 0) },
+    { key: "Minimum Area Cap", label: "Minimum Area Cap", val: Number(model.area_cap_m2 || 0) },
+  ];
+  const maxVal = Math.max(10, ...drivers.map((d) => d.val));
+  const barAreaX = 132, barMaxW = 160;
+  let barsSvg = "";
+  drivers.forEach((d, idx) => {
+    const y = 78 + idx * 44;
+    const isLim = d.key === model.limiting_factor;
+    const bw = Math.max(3, (d.val / maxVal) * barMaxW);
+    barsSvg += `
+      <text x="${barAreaX - 8}" y="${y + 16}" text-anchor="end" font-size="9.2" font-weight="${isLim ? 800 : 600}" fill="${isLim ? "#0d241b" : "#334155"}">${esc(d.label)}</text>
+      <rect x="${barAreaX}" y="${y}" width="${bw.toFixed(1)}" height="24" rx="4" fill="${isLim ? "#143628" : "#94a3b8"}" />
+      <text x="${(barAreaX + bw + 6).toFixed(1)}" y="${y + 16}" font-size="9.2" font-weight="${isLim ? 800 : 600}" fill="${isLim ? "#143628" : "#475569"}">${d.val.toFixed(1)} m²${isLim ? " ★" : ""}</text>
+    `;
+  });
+
+  // Right panel: Alstonville 1970-1991 monthly rainfall vs ET
+  const months = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  const rain = [194, 232, 239, 178, 152, 134, 88, 72, 64, 108, 136, 165];
+  const et = [146, 121, 114, 89, 68, 56, 61, 79, 101, 123, 134, 151];
+  const chartX = 416, chartY = 92, chartW = 312, chartH = 148;
+  const maxMm = 260;
+  const stepX = chartW / months.length;
+
+  let climateBars = "";
+  let etPts = "";
+  months.forEach((m, i) => {
+    const bx = chartX + i * stepX + 4;
+    const bw = stepX - 8;
+    const rh = (rain[i] / maxMm) * chartH;
+    const ry = chartY + chartH - rh;
+    const ex = chartX + i * stepX + stepX / 2;
+    const ey = chartY + chartH - (et[i] / maxMm) * chartH;
+    climateBars += `
+      <rect x="${bx.toFixed(1)}" y="${ry.toFixed(1)}" width="${bw.toFixed(1)}" height="${rh.toFixed(1)}" fill="#93c5fd" stroke="#1d4ed8" stroke-width="0.8" />
+      <text x="${ex.toFixed(1)}" y="${chartY + chartH + 14}" text-anchor="middle" font-size="8.4" fill="#475569">${m}</text>
+    `;
+    etPts += `${i === 0 ? "M" : "L"}${ex.toFixed(1)},${ey.toFixed(1)} `;
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
+      OSMODEL300614 LAA SIZING DRIVERS &amp; ALSTONVILLE WATER BALANCE SUMMARY
+    </text>
+    <text x="${W / 2}" y="40" text-anchor="middle" font-size="9.5" fill="#52635c">
+      Governing Factor: ${esc(model.limiting_factor)} (${model.required_laa_m2} m² LAA) · Flow: ${model.total_flow_ld} L/d · Actual Rate: ${model.daily_loading_rate_actual_mmd} mm/d vs Max ${model.max_deep_drainage_mmd} mm/d
+    </text>
+
+    <!-- Left panel -->
+    <rect x="16" y="54" width="356" height="212" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+    <text x="28" y="71" font-size="9.6" font-weight="800" fill="#143628">1. AREA DETERMINATION (m²)</text>
+    ${barsSvg}
+    <text x="28" y="254" font-size="8.3" fill="#475569">★ Limiting factor governs LAA sizing (+ 100% Reserve = ${model.reserve_laa_m2} m²)</text>
+
+    <!-- Right panel -->
+    <rect x="386" y="54" width="358" height="212" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+    <text x="398" y="71" font-size="9.6" font-weight="800" fill="#143628">2. ALSTONVILLE RAINFALL vs. ET (1970–1991)</text>
+    <line x1="${chartX}" y1="${chartY + chartH}" x2="${chartX + chartW}" y2="${chartY + chartH}" stroke="#475569" stroke-width="1.2" />
+    <line x1="${chartX}" y1="${chartY}" x2="${chartX}" y2="${chartY + chartH}" stroke="#475569" stroke-width="1.2" />
+    <text x="${chartX - 4}" y="${chartY + 6}" text-anchor="end" font-size="7.6" fill="#64748b">260</text>
+    <text x="${chartX - 4}" y="${chartY + chartH / 2 + 3}" text-anchor="end" font-size="7.6" fill="#64748b">130</text>
+    <text x="${chartX - 4}" y="${chartY + chartH}" text-anchor="end" font-size="7.6" fill="#64748b">0</text>
+    ${climateBars}
+    <path d="${etPts.trim()}" fill="none" stroke="#b45309" stroke-width="2.2" />
+    <rect x="556" y="61" width="10" height="8" fill="#93c5fd" stroke="#1d4ed8" stroke-width="0.8" />
+    <text x="570" y="68" font-size="8" fill="#334155">Mean Rain (mm)</text>
+    <line x1="654" y1="65" x2="668" y2="65" stroke="#b45309" stroke-width="2.2" />
+    <text x="672" y="68" font-size="8" fill="#334155">Crop ET</text>
+
+    <!-- Exceedance verification footer -->
+    <rect x="16" y="274" width="${W - 32}" height="26" rx="6" fill="#f0fdf4" stroke="#166534" stroke-width="1" />
+    <text x="${W / 2}" y="291" text-anchor="middle" font-size="9" font-weight="800" fill="#14532d">
+      7,670-DAY BALANCE VERIFIED: 95th-Percentile Exceedance = ${Number(model.p95_exceedance_mm || 0).toFixed(2)} mm  |  Exceedance Days: ${model.exceedance_days_count} / 7,670 (${model.exceedance_pct_of_days}%)  |  Bucket Sat/AWC: ${model.bucket_cap_sat_mm}/${model.bucket_cap_awc_mm} mm
+    </text>
+  </svg>`;
+}
+
+/** 9. Stratigraphic Soil Borehole Profile Graphic (BH1, BH2, ...) */
+export function renderBoreholeProfileSvg(inp, model, audit) {
+  const bhs = Array.isArray(inp.boreholes) ? inp.boreholes : [];
+  const W = 740, H = 310;
+  const maxDepth = Math.max(
+    1000,
+    ...bhs.flatMap((b) => (b.horizons || []).map((h) => Number(h.depth_bottom_mm || 0))),
+  );
+  const topY = 74, colH = 182;
+  const depthToY = (mm) => topY + (mm / maxDepth) * colH;
+
+  const horizonFill = (h) => {
+    const c = String(h.colour || "").toLowerCase();
+    if (c.includes("dark") || String(h.horizon || "").toUpperCase().startsWith("A")) return "#8b6b4a";
+    if (c.includes("red")) return "#b86b4b";
+    if (c.includes("grey") || c.includes("gray")) return "#94a3b8";
+    if (c.includes("yellow") || c.includes("ochre")) return "#d4a359";
+    return "#b08968";
+  };
+
+  let rulerSvg = `<line x1="66" y1="${topY}" x2="66" y2="${topY + colH}" stroke="#334155" stroke-width="1.5" />`;
+  for (let d = 0; d <= maxDepth; d += 200) {
+    const y = depthToY(d);
+    rulerSvg += `
+      <line x1="60" y1="${y.toFixed(1)}" x2="66" y2="${y.toFixed(1)}" stroke="#334155" stroke-width="1.2" />
+      <text x="56" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="8.2" fill="#475569">${d}</text>
+    `;
+  }
+
+  const colAreaW = W - 104;
+  const slotW = colAreaW / Math.max(1, bhs.length);
+  const barW = Math.min(84, slotW * 0.36);
+
+  let colsSvg = "";
+  bhs.forEach((bh, idx) => {
+    const bx = 92 + idx * slotW;
+    const bhMax = Math.max(0, ...(bh.horizons || []).map((h) => Number(h.depth_bottom_mm || 0)));
+    colsSvg += `<text x="${(bx + barW / 2).toFixed(1)}" y="${topY - 10}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#0d241b">${esc(bh.borehole_id)} (${bhMax} mm)</text>`;
+    for (const h of bh.horizons || []) {
+      const y1 = depthToY(Number(h.depth_top_mm || 0));
+      const y2 = depthToY(Number(h.depth_bottom_mm || 0));
+      const hh = Math.max(14, y2 - y1);
+      const midY = y1 + hh / 2;
+      const isDisp = Boolean(h.is_disposal_level);
+      const dispCls = h.dispersive_class != null ? Number(h.dispersive_class) : null;
+      const fill = horizonFill(h);
+      colsSvg += `
+        <rect x="${bx.toFixed(1)}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${hh.toFixed(1)}" fill="${fill}" stroke="${isDisp ? "#b45309" : "#1e293b"}" stroke-width="${isDisp ? 2.4 : 1.1}" />
+        <text x="${(bx + barW / 2).toFixed(1)}" y="${(midY + 3.5).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#ffffff">${esc(h.horizon)}${isDisp ? "*" : ""}</text>
+        <text x="${(bx + barW + 8).toFixed(1)}" y="${(midY - 2).toFixed(1)}" font-size="8.4" font-weight="${isDisp ? 800 : 600}" fill="#0f172a">${esc(h.classification || "")} (${h.depth_top_mm}–${h.depth_bottom_mm})</text>
+        <text x="${(bx + barW + 8).toFixed(1)}" y="${(midY + 10).toFixed(1)}" font-size="8.0" font-weight="${dispCls >= 3 ? 800 : 500}" fill="${dispCls >= 3 ? "#991b1b" : "#475569"}">pH ${h.ph != null ? Number(h.ph).toFixed(1) : "—"} · Emerson ${dispCls != null ? "Class " + dispCls : "—"}</text>
+      `;
+    }
+  });
+
+  const gypBanner = audit?.requires_gypsum
+    ? `DISPERSIVE SUBSOIL (EMERSON CLASS 3/4): APPLY AGRICULTURAL GYPSUM @ ${Number(audit.gypsum_rate_kg_m2 || 1.0).toFixed(1)} kg/m²`
+    : "NON-DISPERSIVE PROFILE (EMERSON CLASS 1–2) · DISPOSAL HORIZON (*) CONFIRMED";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; border:1px solid #d7dfd9; border-radius:8px; font-family:Inter,sans-serif;">
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
+      STRATIGRAPHIC SOIL BOREHOLE PROFILES — ${esc(model.morand_unit_name)} (${esc(model.morand_code)}) · SOIL CATEGORY ${model.soil_category}
+    </text>
+    <text x="${W / 2}" y="40" text-anchor="middle" font-size="9.4" fill="#52635c">
+      ${esc(model.soil_texture_name)} (Ksat ${esc(model.soil_ksat_md)} m/d) · Water Table / Bedrock: ≥ ${Number(inp.site_eval?.depth_to_water_table_m ?? 3.0).toFixed(1)} m · * Denotes Disposal Horizon
+    </text>
+    <text x="56" y="${topY - 10}" text-anchor="end" font-size="8.2" font-weight="700" fill="#334155">mm</text>
+    ${rulerSvg}
+    ${colsSvg}
+    <rect x="24" y="272" width="${W - 48}" height="26" rx="6" fill="${audit?.requires_gypsum ? "#fef3c7" : "#f0fdf4"}" stroke="${audit?.requires_gypsum ? "#b45309" : "#166534"}" stroke-width="1.1" />
+    <text x="${W / 2}" y="289" text-anchor="middle" font-size="8.9" font-weight="800" fill="${audit?.requires_gypsum ? "#92400e" : "#14532d"}">
+      ${esc(gypBanner)}
+    </text>
   </svg>`;
 }
 

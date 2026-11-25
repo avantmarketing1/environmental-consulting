@@ -63,8 +63,14 @@ def test_lismore_see_audit_and_docx_for_agritourism_ru1_bushfire_lot(tmp_path: P
         cell.text for tbl in d.tables for row in tbl.rows for cell in row.cells
     )
     assert "STATEMENT OF ENVIRONMENTAL EFFECTS (SEE)" in full_text
+    assert "Document Control & Revision History" in full_text
+    assert "EP&A Act 1979 Section 4.15(1) Matters for Consideration Scorecard" in full_text
     assert "Lismore Local Environmental Plan (LEP) 2012" in full_text
     assert "Lismore Development Control Plan (DCP) 2012" in full_text
     assert "ecologically regenerative agritourism development in Koonorigan" in full_text
     assert "1,000 L Grease Arrestor" in full_text
     assert "Bushfire Attack Level (BAL)" in full_text
+    assert "Workbench" not in full_text
+    assert "parcel centroid" not in full_text
+    assert any(p.style.name == "Heading 1" for p in d.paragraphs)
+    assert d.sections[0].different_first_page_header_footer is True

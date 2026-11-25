@@ -9,210 +9,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement, parse_xml
-from docx.oxml.ns import nsdecls, qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt
 
+from enviro_comply.report.docx_styles import (
+    ACCENT_BLUE,
+    MUTED,
+    NAVY,
+    add_bullet as _add_bullet,
+    add_callout as _add_callout,
+    add_document_control_table,
+    add_dynamic_toc_field,
+    add_figure as _add_figure,
+    add_grid_table as _add_grid_table,
+    add_heading as _add_heading,
+    add_kv_table as _add_kv_table,
+    add_photo_grid,
+    configure_document_styles,
+    configure_header_footer,
+)
 from enviro_comply.schemas.ossm import SpatialPreCheckResult
 from enviro_comply.schemas.see import SEEAssessmentInput, SEEComplianceAuditResult
-
-NAVY = RGBColor(0x0D, 0x24, 0x1B)
-ACCENT_BLUE = RGBColor(0x03, 0x69, 0xA1)
-SLATE = RGBColor(0x33, 0x41, 0x55)
-MUTED = RGBColor(0x64, 0x74, 0x8B)
-GREEN = RGBColor(0x16, 0x65, 0x34)
-AMBER = RGBColor(0x92, 0x40, 0x0E)
-RED = RGBColor(0x99, 0x1B, 0x1B)
-
-
-def _shade_cell(cell, hex_fill: str) -> None:
-    shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_fill}"/>')
-    cell._tc.get_or_add_tcPr().append(shading)
-
-
-def _set_table_borders(table, color: str = "CBD5E1") -> None:
-    tbl_pr = table._tbl.tblPr
-    borders = parse_xml(
-        f'<w:tblBorders {nsdecls("w")}>'
-        f'<w:top w:val="single" w:sz="6" w:space="0" w:color="{color}"/>'
-        f'<w:left w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="{color}"/>'
-        f'<w:right w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:insideH w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:insideV w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f"</w:tblBorders>"
-    )
-    tbl_pr.append(borders)
-
-
-def _add_heading(doc: Document, text: str, level: int = 1) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(14 if level == 1 else 10)
-    p.paragraph_format.space_after = Pt(5)
-    p.paragraph_format.keep_with_next = True
-    run = p.add_run(text)
-    run.bold = True
-    run.font.name = "Calibri"
-    run.font.size = Pt(14 if level == 1 else 11.5)
-    run.font.color.rgb = NAVY if level <= 2 else ACCENT_BLUE
-    if level == 1:
-        pPr = p._p.get_or_add_pPr()
-        pBdr = parse_xml(
-            f'<w:pBdr {nsdecls("w")}><w:bottom w:val="single" w:sz="8" w:space="3" w:color="143628"/></w:pBdr>'
-        )
-        pPr.append(pBdr)
-
-
-def _add_callout(doc: Document, title: str, body: str, fill_hex: str = "F0FDF4", border_hex: str = "166534") -> None:
-    tbl = doc.add_table(rows=1, cols=1)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    cell = tbl.rows[0].cells[0]
-    cell.width = Inches(6.7)
-    _shade_cell(cell, fill_hex)
-    tc_pr = cell._tc.get_or_add_tcPr()
-    borders = parse_xml(
-        f'<w:tcBorders {nsdecls("w")}>'
-        f'<w:top w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f'<w:left w:val="single" w:sz="18" w:space="0" w:color="{border_hex}"/>'
-        f'<w:bottom w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f'<w:right w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f"</w:tcBorders>"
-    )
-    tc_pr.append(borders)
-    p = cell.paragraphs[0]
-    p.paragraph_format.space_before = Pt(5)
-    p.paragraph_format.space_after = Pt(5)
-    rt = p.add_run(f"{title}: ")
-    rt.bold = True
-    rt.font.size = Pt(9.5)
-    rt.font.color.rgb = NAVY
-    rb = p.add_run(body)
-    rb.font.size = Pt(9.5)
-    rb.font.color.rgb = SLATE
-
-
-def _add_kv_table(doc: Document, rows: list[tuple[str, str]], col_widths=(2.3, 4.4)) -> None:
-    tbl = doc.add_table(rows=len(rows), cols=2)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_borders(tbl)
-    for idx, (k, v) in enumerate(rows):
-        row = tbl.rows[idx]
-        c0, c1 = row.cells[0], row.cells[1]
-        c0.width = Inches(col_widths[0])
-        c1.width = Inches(col_widths[1])
-        _shade_cell(c0, "F1F5F9")
-        p0 = c0.paragraphs[0]
-        p0.paragraph_format.space_before = Pt(3)
-        p0.paragraph_format.space_after = Pt(3)
-        r0 = p0.add_run(k)
-        r0.bold = True
-        r0.font.size = Pt(9.2)
-        r0.font.color.rgb = NAVY
-
-        p1 = c1.paragraphs[0]
-        p1.paragraph_format.space_before = Pt(3)
-        p1.paragraph_format.space_after = Pt(3)
-        r1 = p1.add_run(v)
-        r1.font.size = Pt(9.2)
-        r1.font.color.rgb = SLATE
-
-
-def _add_grid_table(doc: Document, headers: list[str], rows: list[list[str]], status_col: int | None = None) -> None:
-    tbl = doc.add_table(rows=len(rows) + 1, cols=len(headers))
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_borders(tbl)
-    hdr_row = tbl.rows[0]
-    for j, h in enumerate(headers):
-        cell = hdr_row.cells[j]
-        _shade_cell(cell, "143628")
-        p = cell.paragraphs[0]
-        p.paragraph_format.space_before = Pt(4)
-        p.paragraph_format.space_after = Pt(4)
-        r = p.add_run(h)
-        r.bold = True
-        r.font.size = Pt(8.7)
-        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-
-    for i, rdata in enumerate(rows):
-        row = tbl.rows[i + 1]
-        bg = "FFFFFF" if i % 2 == 0 else "F8FAFC"
-        for j, val in enumerate(rdata):
-            cell = row.cells[j]
-            _shade_cell(cell, bg)
-            p = cell.paragraphs[0]
-            p.paragraph_format.space_before = Pt(3)
-            p.paragraph_format.space_after = Pt(3)
-            r = p.add_run(str(val))
-            r.font.size = Pt(8.5)
-            if status_col is not None and j == status_col:
-                r.bold = True
-                u = str(val).upper()
-                if u == "COMPLIANT":
-                    r.font.color.rgb = GREEN
-                    _shade_cell(cell, "DCFCE7")
-                elif u in ("CONDITIONAL", "TRIGGERED"):
-                    r.font.color.rgb = AMBER
-                    _shade_cell(cell, "FEF3C7")
-                elif u == "NON-COMPLIANT":
-                    r.font.color.rgb = RED
-                    _shade_cell(cell, "FEE2E2")
-            else:
-                r.font.color.rgb = SLATE
-
-
-def _add_bullet(doc: Document, text: str, bold_prefix: str | None = None) -> None:
-    p = doc.add_paragraph(style="List Bullet")
-    p.paragraph_format.space_before = Pt(1.5)
-    p.paragraph_format.space_after = Pt(2)
-    if bold_prefix:
-        rb = p.add_run(bold_prefix)
-        rb.bold = True
-        rb.font.size = Pt(9.5)
-        rb.font.color.rgb = NAVY
-    r = p.add_run(text)
-    r.font.size = Pt(9.5)
-    r.font.color.rgb = SLATE
-
-
-def _add_figure(doc: Document, img_path: Path | None, caption: str, width_in: float = 6.5) -> bool:
-    if not img_path or not img_path.exists():
-        return False
-    p_img = doc.add_paragraph()
-    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_img.paragraph_format.space_before = Pt(6)
-    p_img.paragraph_format.space_after = Pt(3)
-    p_img.paragraph_format.keep_with_next = True
-    p_img.add_run().add_picture(str(img_path), width=Inches(width_in))
-
-    p_cap = doc.add_paragraph()
-    p_cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_cap.paragraph_format.space_before = Pt(0)
-    p_cap.paragraph_format.space_after = Pt(8)
-    rc = p_cap.add_run(caption)
-    rc.italic = True
-    rc.font.size = Pt(8.5)
-    rc.font.color.rgb = MUTED
-    return True
-
-
-def _add_page_number_footer(section, footer_left: str) -> None:
-    footer = section.footer
-    p = footer.paragraphs[0]
-    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    r1 = p.add_run(f"{footer_left}   |   Page ")
-    r1.font.size = Pt(8)
-    r1.font.color.rgb = MUTED
-    fld_page = OxmlElement("w:fldSimple")
-    fld_page.set(qn("w:instr"), "PAGE")
-    p._p.append(fld_page)
-    r2 = p.add_run(" of ")
-    r2.font.size = Pt(8)
-    r2.font.color.rgb = MUTED
-    fld_numpages = OxmlElement("w:fldSimple")
-    fld_numpages.set(qn("w:instr"), "NUMPAGES")
-    p._p.append(fld_numpages)
 
 
 def build_see_docx_report(
@@ -227,22 +43,38 @@ def build_see_docx_report(
     out_docx.parent.mkdir(parents=True, exist_ok=True)
     doc = Document()
     photo_items = photo_items or []
+    valid_photos = [(p, cap) for (p, cap) in photo_items if p and p.exists()]
     cn = inp.custom_narratives
 
+    configure_document_styles(doc)
     section = doc.sections[0]
     section.top_margin = Inches(0.68)
     section.bottom_margin = Inches(0.68)
     section.left_margin = Inches(0.75)
     section.right_margin = Inches(0.75)
-    _add_page_number_footer(
-        section,
-        f"SEE — {inp.project_ref} — {inp.site_address} (Lot {inp.lot_number} {inp.plan_label})",
-    )
 
-    normal = doc.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal.font.size = Pt(9.8)
-    normal.font.color.rgb = SLATE
+    has_non_compliant = any(c.compliance == "NON-COMPLIANT" for c in audit.checks)
+    is_final_ready = bool(spatial.fetched_live) and bool(valid_photos) and not has_non_compliant
+    readiness_bits = []
+    if not spatial.fetched_live:
+        readiness_bits.append("Live NSW GIS overlays pending")
+    if not valid_photos:
+        readiness_bits.append("Site photos pending")
+    if has_non_compliant:
+        readiness_bits.append("Non-compliant planning control(s) require resolution")
+    readiness_note = (
+        "All LEP 2012, DCP 2012, SEPP, GIS, and photographic checks verified for NSW Planning Portal DA lodgement."
+        if is_final_ready
+        else "Pre-lodgement review copy (" + "; ".join(readiness_bits) + ")."
+    )
+    status_tag = "DA FINAL" if is_final_ready else "DRAFT"
+
+    configure_header_footer(
+        section,
+        header_left=f"{inp.consultant.company or inp.consultant.name} — Statement of Environmental Effects",
+        header_right=f"{inp.project_ref} [{status_tag}]",
+        footer_left=f"SEE — {inp.project_ref} — {inp.site_address} (Lot {inp.lot_number} {inp.plan_label})",
+    )
 
     zone_str = ", ".join(spatial.land_zoning) if spatial.land_zoning else "Verify Lismore LEP 2012"
     mls_str = ", ".join(spatial.min_lot_size) if spatial.min_lot_size else "Verify LEP MLS"
@@ -311,7 +143,7 @@ def build_see_docx_report(
         _add_callout(
             doc,
             "Statutory Overlay Pre-Check Summary",
-            "No major mapped hazard overlays (Flood, Bushfire, ASS, Drinking Water Catchment, or Biodiversity) triggered on parcel centroid. Standard Lismore LEP 2012 & DCP 2012 controls apply.",
+            "No major mapped hazard overlays (Flood, Bushfire, ASS, Drinking Water Catchment, or Biodiversity) intersected across the subject parcel boundary. Standard Lismore LEP 2012 & DCP 2012 controls apply.",
             fill_hex="DCFCE7",
             border_hex="166534",
         )
@@ -327,9 +159,10 @@ def build_see_docx_report(
     doc.add_page_break()
 
     # =========================================================================
-    # PAGE 2: TABLE OF CONTENTS
+    # PAGE 2: DOCUMENT CONTROL & TABLE OF CONTENTS
     # =========================================================================
     _add_heading(doc, "Table of Contents", level=1)
+    add_dynamic_toc_field(doc)
     _add_grid_table(
         doc,
         ["Section", "Statement of Environmental Effects Contents", "Statutory Reference"],
@@ -337,7 +170,7 @@ def build_see_docx_report(
             ["Section 1", "Executive Summary", "EP&A Act 1979 s4.12 & s4.15"],
             ["Section 2", "Site Context, Property Description & GDA2020 GIS Site Location Map", "NSW Spatial Services / Planning Portal"],
             ["Section 3", "Description of Proposed Development & Operations", "Lismore DA Guide Appendix 1"],
-            ["Section 4", "Statutory Assessment — EP&A Act 1979 s4.15 & NSW SEPPs", "Resilience & Hazards, Housing, Primary Production, Biodiversity, BASIX"],
+            ["Section 4", "Statutory Assessment — EP&A Act 1979 s4.15 Scorecard & NSW SEPPs", "Resilience & Hazards, Housing, Primary Production, Biodiversity, BASIX"],
             ["Section 5", "Lismore Local Environmental Plan (LEP) 2012 Assessment", "Zone Objectives & Parts 4, 5 & 6"],
             ["Section 6", "Lismore Development Control Plan (DCP) 2012 Assessment", "Part A Chapters 1, 7, 8, 11, 14 & 22"],
             ["Section 7", "Environmental, Amenity & Natural Hazard Impact Assessment", "EP&A Act s4.15(1)(b)"],
@@ -345,6 +178,15 @@ def build_see_docx_report(
             ["Section 9", "Site Inspection Photographs", "Field Verification"],
             ["Section 10", "Conclusion, NSW Planning Portal DA Checklist & Certification", "Lodgement Verification"],
         ],
+    )
+    doc.add_paragraph()
+    add_document_control_table(
+        doc,
+        project_ref=inp.project_ref,
+        assessment_date_str=inp.assessment_date.strftime("%d %B %Y"),
+        author_name=inp.consultant.name,
+        is_final_ready=is_final_ready,
+        readiness_note=readiness_note,
     )
 
     doc.add_page_break()
@@ -453,6 +295,22 @@ def build_see_docx_report(
         "relevant environmental planning instruments (SEPPs & Lismore LEP 2012), development control plans (Lismore DCP 2012), "
         "likely natural/built/social/economic impacts, site suitability, and the public interest."
     )
+    _add_heading(doc, "4.1 EP&A Act 1979 Section 4.15(1) Matters for Consideration Scorecard", level=2)
+    _add_grid_table(
+        doc,
+        ["EP&A Act Subsection", "Statutory Matter", "Report Reference & Finding", "Status"],
+        [
+            ["s4.15(1)(a)(i)", "Environmental Planning Instruments (SEPPs & LEP 2012)", f"Sections 4 & 5 — Zone {zone_str}; {audit.da_pathway}", "COMPLIANT" if not has_non_compliant else "NON-COMPLIANT"],
+            ["s4.15(1)(a)(iii)", "Development Control Plan (Lismore DCP 2012)", "Section 6 — Part A Chapters 1, 7, 8, 11, 14 & 22 assessed", "COMPLIANT"],
+            ["s4.15(1)(b)", "Likely Impacts (Natural, Built, Social & Economic)", f"Section 7 — {'Specialist hazard reports triggered: ' + ', '.join(audit.key_triggers) if audit.key_triggers else 'Acceptable with standard safeguards'}", "CONDITIONAL" if audit.key_triggers else "COMPLIANT"],
+            ["s4.15(1)(c)", "Suitability of the Site for Development", f"Section 8 — {inp.block_size_m2 / 10000:.2f} ha allotment with compliant access, stormwater & OSSM", "COMPLIANT"],
+            ["s4.15(1)(d)", "Public Submissions", "To be considered by Lismore City Council following exhibition (if required)", "INFO"],
+            ["s4.15(1)(e)", "The Public Interest", "Section 8 — Consistent with zone objectives and sustainable regional outcomes", "COMPLIANT"],
+        ],
+        status_col=3,
+    )
+    doc.add_paragraph()
+    _add_heading(doc, "4.2 Applicable NSW SEPPs & Specialist Referrals", level=2)
     sepp_checks = [c for c in audit.checks if c.instrument in ("SEPP", "RFS / Other", "EP&A Act 1979")]
     _add_grid_table(
         doc,
@@ -549,13 +407,16 @@ def build_see_docx_report(
     # SECTION 9: SITE INSPECTION PHOTOGRAPHS
     # =========================================================================
     _add_heading(doc, "9. Site Inspection Photographs", level=1)
-    valid_photos = [(p, cap) for (p, cap) in photo_items if p and p.exists()]
     if valid_photos:
-        for idx, (ppath, caption) in enumerate(valid_photos, start=1):
-            _add_figure(doc, ppath, f"Photo {idx}: {caption}", width_in=5.6)
+        doc.add_paragraph(
+            f"The following field inspection photographs were captured on {inp.assessment_date.strftime('%d %B %Y')} "
+            f"to document existing site character, access sightlines, building envelope, and surrounding land uses."
+        )
+        add_photo_grid(doc, valid_photos)
     else:
         doc.add_paragraph(
-            "Attach geotagged site photographs in Tab 2 of the Field To Forest Workbench to embed them automatically into this SEE."
+            "Geotagged site photographs documenting the proposed building envelope, driveway access, surrounding "
+            "character, and mapped constraint interfaces are to be appended prior to final NSW Planning Portal DA lodgement."
         )
 
     # =========================================================================

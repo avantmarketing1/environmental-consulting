@@ -4,6 +4,105 @@
  * Runs all 7,670 Alstonville climate days in < 5 ms with zero server CPU and 100% offline support.
  */
 
+const DEG2RAD = Math.PI / 180;
+
+/** Convert WGS84/GDA2020 (lon, lat) -> GDA2020 / MGA Zone 56 (EPSG:7856) Easting/Northing (metres). */
+export function wgs84ToMga56(lon, lat) {
+  const a = 6378137.0;
+  const f = 1 / 298.257222101;
+  const k0 = 0.9996;
+  const e2 = 2 * f - f * f;
+  const ep2 = e2 / (1 - e2);
+  const lon0 = 153.0 * DEG2RAD;
+
+  const phi = lat * DEG2RAD;
+  const lam = lon * DEG2RAD;
+  const sinPhi = Math.sin(phi);
+  const cosPhi = Math.cos(phi);
+  const tanPhi = Math.tan(phi);
+
+  const N = a / Math.sqrt(1 - e2 * sinPhi * sinPhi);
+  const T = tanPhi * tanPhi;
+  const C = ep2 * cosPhi * cosPhi;
+  const A = cosPhi * (lam - lon0);
+
+  const M =
+    a *
+    ((1 - e2 / 4 - (3 * e2 * e2) / 64 - (5 * e2 ** 3) / 256) * phi -
+      ((3 * e2) / 8 + (3 * e2 * e2) / 32 + (45 * e2 ** 3) / 1024) * Math.sin(2 * phi) +
+      ((15 * e2 * e2) / 256 + (45 * e2 ** 3) / 1024) * Math.sin(4 * phi) -
+      ((35 * e2 ** 3) / 3072) * Math.sin(6 * phi));
+
+  const easting =
+    500000 +
+    k0 *
+      N *
+      (A +
+        ((1 - T + C) * A ** 3) / 6 +
+        ((5 - 18 * T + T * T + 72 * C - 58 * ep2) * A ** 5) / 120);
+
+  const northing =
+    10000000 +
+    k0 *
+      (M +
+        N *
+          tanPhi *
+          ((A * A) / 2 +
+            ((5 - T + 9 * C + 4 * C * C) * A ** 4) / 24 +
+            ((61 - 58 * T + T * T + 600 * C - 330 * ep2) * A ** 6) / 720));
+
+  return [Math.round(easting * 100) / 100, Math.round(northing * 100) / 100];
+}
+
+function pointToSegDistM(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 1e-12) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** Measure exact MGA56 distance (m) from a pin [easting, northing] to parcel boundary & mapped watercourses. */
+export function computePinSetbacksMeters(pinMga, spatial) {
+  if (!pinMga || !spatial) return { boundary_m: null, watercourse_m: null };
+  const [px, py] = pinMga;
+
+  let boundaryM = Infinity;
+  const pg = spatial.parcel_geojson?.geometry;
+  if (pg) {
+    const rings = pg.type === "Polygon" ? [pg.coordinates[0]] : pg.type === "MultiPolygon" ? pg.coordinates.map((p) => p[0]) : [];
+    for (const ring of rings) {
+      if (!Array.isArray(ring) || ring.length < 2) continue;
+      const mgaPts = ring.map(([lon, lat]) => wgs84ToMga56(lon, lat));
+      for (let i = 0; i < mgaPts.length - 1; i++) {
+        const d = pointToSegDistM(px, py, mgaPts[i][0], mgaPts[i][1], mgaPts[i + 1][0], mgaPts[i + 1][1]);
+        if (d < boundaryM) boundaryM = d;
+      }
+    }
+  }
+
+  let waterM = Infinity;
+  for (const wf of spatial.watercourses_geojson || []) {
+    const g = wf?.geometry;
+    if (!g) continue;
+    const lines = g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : [];
+    for (const line of lines) {
+      if (!Array.isArray(line) || line.length < 2) continue;
+      const mgaPts = line.map(([lon, lat]) => wgs84ToMga56(lon, lat));
+      for (let i = 0; i < mgaPts.length - 1; i++) {
+        const d = pointToSegDistM(px, py, mgaPts[i][0], mgaPts[i][1], mgaPts[i + 1][0], mgaPts[i + 1][1]);
+        if (d < waterM) waterM = d;
+      }
+    }
+  }
+
+  return {
+    boundary_m: Number.isFinite(boundaryM) ? Math.round(boundaryM * 10) / 10 : null,
+    watercourse_m: Number.isFinite(waterM) ? Math.round(waterM * 10) / 10 : null,
+  };
+}
+
 let _climateCache = null;
 let _rulesCache = null;
 
@@ -237,10 +336,17 @@ export function runLismoreModelJS(inp, rules, climate) {
   let rbModel = null, rbCount = 0, rbProvided = 0, rbDims = null;
 
   if (inp.treatment_system === "secondary_reed_bed") {
-    rbHrt = hrtBod;
-    tnOut = 1.5 + (tnIn - 1.5) * Math.exp(-0.18 * rbHrt);
-    bodOut = 20.0;
-    rbArea = (rbHrt * qM3d) / (wettedDepth * 0.4);
+    if (inp.reed_bed_area_override_m2 != null && Number(inp.reed_bed_area_override_m2) > 0) {
+      rbArea = Number(inp.reed_bed_area_override_m2);
+      rbHrt = (rbArea * 0.4 * wettedDepth) / qM3d;
+      tnOut = 1.5 + (tnIn - 1.5) * Math.exp(-0.18 * rbHrt);
+      bodOut = 5.0 + (bodIn - 5.0) * Math.exp(-kvBod * rbHrt);
+    } else {
+      rbHrt = hrtBod;
+      tnOut = 1.5 + (tnIn - 1.5) * Math.exp(-0.18 * rbHrt);
+      bodOut = 20.0;
+      rbArea = (rbHrt * qM3d) / (wettedDepth * 0.4);
+    }
     nRem = Math.max(0, 1.0 - tnOut / tnIn);
     const bestTray = [...rules.reed_bed_trays].sort((a, b) => Math.abs(a.wetted_depth_m - wettedDepth) - Math.abs(b.wetted_depth_m - wettedDepth))[0];
     rbModel = bestTray.model;
@@ -408,7 +514,10 @@ export function runLismoreModelJS(inp, rules, climate) {
 }
 
 export function auditLismoreComplianceJS(inp, spatial, model, rules) {
+  const bufs = rules.buffers_m;
+  const limits = rules.design_limits;
   const se = inp.site_eval || {};
+  const sp = spatial || {};
   const checks = [];
   const departures = [];
   let siteLim = false;
@@ -424,105 +533,314 @@ export function auditLismoreComplianceJS(inp, spatial, model, rules) {
     }
   };
 
+  // --- 1. SITE LIMITATIONS (Table 6) ---
   const isEta = inp.land_application_type === "eta_beds";
-  if (Number(se.slope_pct || 0) > 15) {
+  const slopePct = Number(se.slope_pct ?? 0);
+  if (slopePct > limits.eta_max_slope_pct) {
     needsSec = true;
-    if (isEta) departures.push(`Site slope (${se.slope_pct}%) exceeds 15% max for ETA beds (Strategy Table 6).`);
-    add("SITE-SLOPE", "Site", "Slope Angle", `${se.slope_pct}%`, "< 15% for ETA beds", "LCC Strategy 2013 Table 6", isEta ? "FAIL" : "LIMITATION");
+    const st = isEta ? "FAIL" : "LIMITATION";
+    const mit = "Secondary treatment + sub-surface irrigation or engineered retaining/terracing required.";
+    if (isEta) {
+      departures.push(`Site slope (${slopePct}%) exceeds 15% maximum for ETA beds (Strategy Table 6 & Appendix B s3.0).`);
+    }
+    add("SITE-SLOPE", "Site", "Slope Angle", `${slopePct}%`, "< 15% for ETA beds", "LCC Strategy 2013 Table 6", st, mit);
   } else {
-    add("SITE-SLOPE", "Site", "Slope Angle", `${se.slope_pct ?? 0}%`, "< 15% for ETA beds", "LCC Strategy 2013 Table 6", "PASS");
+    add("SITE-SLOPE", "Site", "Slope Angle", `${slopePct}%`, "< 15% for ETA beds", "LCC Strategy 2013 Table 6", "PASS");
   }
 
-  const aspectU = String(se.aspect || "").toUpperCase();
-  if (aspectU.includes("SOUTH") || aspectU.includes("SW") || aspectU.includes("SE") || se.exposure === "low_sheltered") {
-    add("SITE-EXPOSURE", "Site", "Aspect & Exposure", `${se.aspect} (${se.exposure})`, "NW/NE quadrant, high exposure", "LCC Strategy 2013 Table 6", "LIMITATION", "Encourage grass & downslope Lomandra uptake row.");
+  const landform = se.landform || "linear_planar";
+  const landformNotes = se.landform_notes || "Linear planar slope across proposed disposal area";
+  if (landform === "convergent") {
+    add(
+      "SITE-LANDFORM", "Site", "Landform", landformNotes,
+      "Divergent or planar (water-shedding)", "LCC Strategy 2013 Table 6", "LIMITATION",
+      "Construct upslope diversion bund/swale above the land application area.",
+    );
   } else {
-    add("SITE-EXPOSURE", "Site", "Aspect & Exposure", `${se.aspect} (${se.exposure})`, "NW/NE quadrant, high exposure", "LCC Strategy 2013 Table 6", "PASS");
+    add("SITE-LANDFORM", "Site", "Landform", landformNotes, "Divergent or planar", "LCC Strategy 2013 Table 6", "PASS");
   }
 
-  if (se.below_1_in_20_flood || se.below_1_in_100_flood || spatial?.flood_planning) {
-    departures.push("Site intersects flood planning constraint (Strategy s5.4.1h).");
-    add("SITE-FLOOD", "Site", "Flooding Potential", se.flooding_potential || "Flood overlay", "LAA > 1:20 yr; Tank > 1:100 yr", "LCC Strategy 2013 s5.4.1(h)", "LIMITATION");
+  const aspectStr = se.aspect || "North";
+  const exposureStr = se.exposure || "medium";
+  const aspectU = String(aspectStr).toUpperCase();
+  if (aspectU.includes("SOUTH") || aspectU.includes("SW") || aspectU.includes("SE") || exposureStr === "low_sheltered") {
+    add(
+      "SITE-EXPOSURE", "Site", "Aspect & Exposure", `${aspectStr} (${exposureStr} exposure)`,
+      "NW/NE quadrant with high sun-wind exposure", "LCC Strategy 2013 Table 6", "LIMITATION",
+      "Encourage vigorous perennial grass cover and downslope Lomandra hystrix uptake row; trim overhanging shade trees.",
+    );
   } else {
-    add("SITE-FLOOD", "Site", "Flooding Potential", se.flooding_potential || "None", "LAA > 1:20 yr; Tank > 1:100 yr", "LCC Strategy 2013 s5.4.1(h)", "PASS");
+    add("SITE-EXPOSURE", "Site", "Aspect & Exposure", `${aspectStr} (${exposureStr} exposure)`, "NW/NE quadrant, high exposure", "LCC Strategy 2013 Table 6", "PASS");
   }
 
-  // Buffers
-  if (se.dist_gully_m != null) {
-    const ok = Number(se.dist_gully_m) >= 40;
-    if (!ok) { needsSec = true; departures.push(`Gully buffer (${se.dist_gully_m} m) < 40 m.`); }
-    add("BUF-GULLY", "Buffers", "Gully / Ephemeral Stream", `${se.dist_gully_m} m`, ">= 40 m", "LCC Strategy 2013 s5.4.1(f)", ok ? "PASS" : "LIMITATION");
+  const floodNotes = se.flooding_potential || "None (well above 1-in-20 and 1-in-100 year flood levels)";
+  if (se.below_1_in_20_flood || se.below_1_in_100_flood || sp.flood_planning) {
+    const mit = "Locate treatment system above 1-in-100 year flood level and pump/locate LAA above 1-in-20 year flood level.";
+    departures.push("Site intersects flood planning overlay or flood contour constraint (Strategy s5.4.1(h)).");
+    add("SITE-FLOOD", "Site", "Flooding Potential", floodNotes, "LAA > 1:20 yr; Treatment > 1:100 yr", "LCC Strategy 2013 s5.4.1(h) & Table 6", "LIMITATION", mit);
+  } else {
+    add("SITE-FLOOD", "Site", "Flooding Potential", floodNotes, "LAA > 1:20 yr; Treatment > 1:100 yr", "LCC Strategy 2013 s5.4.1(h) & Table 6", "PASS");
   }
+
+  const siteDrain = se.site_drainage || "Good; no channelled runoff or surface dampness observed";
+  const waterlogVeg = se.waterlogging_vegetation || "No sedges or bullrushes observed";
+  if (se.surface_dampness || se.waterlogging_present) {
+    needsSec = true;
+    add("SITE-DRAIN", "Site", "Site Drainage & Waterlogging", `${siteDrain}; ${waterlogVeg}`, "No dampness or waterlogging indicator species", "LCC Strategy 2013 Table 6", "LIMITATION", "Provide secondary treatment and upslope diversion drainage.");
+  } else {
+    add("SITE-DRAIN", "Site", "Site Drainage & Waterlogging", `${siteDrain}; ${waterlogVeg}`, "No dampness or sedges", "LCC Strategy 2013 Table 6", "PASS");
+  }
+
+  const surfCond = se.surface_condition || "Grassed with no cracking or ponding";
+  if (se.surface_cracking_or_bare) {
+    needsSec = true;
+    add("SITE-SURF", "Site", "Surface Condition", surfCond, "Grassed, no bare ground or cracking", "LCC Strategy 2013 Table 6", "LIMITATION", "Secondary treatment and establish perennial grass cover over LAA.");
+  } else {
+    add("SITE-SURF", "Site", "Surface Condition", surfCond, "Grassed, no bare ground or cracking", "LCC Strategy 2013 Table 6", "PASS");
+  }
+
+  const fillNotes = se.fill_notes || "None";
+  if (se.contains_fill) {
+    add("SITE-FILL", "Site", "Fill", fillNotes, "Disposal area not on uncontrolled fill", "LCC Strategy 2013 s5.4.1(l) & Table 6", "LIMITATION", "Relocate LAA off fill or provide geotechnical certification.");
+  } else {
+    add("SITE-FILL", "Site", "Fill", fillNotes, "No uncontrolled fill", "LCC Strategy 2013 s5.4.1(l) & Table 6", "PASS");
+  }
+
+  const erosionNotes = se.erosion_notes || "No rills, slips, or mass movement observed";
+  if (se.erosion_present) {
+    add("SITE-EROSION", "Site", "Erosion / Mass Movement", erosionNotes, "No rills, slips, or mass movement", "LCC Strategy 2013 Table 6", "LIMITATION", "Stabilise with deep-rooted vegetation and upslope runoff diversion.");
+  } else {
+    add("SITE-EROSION", "Site", "Erosion / Mass Movement", erosionNotes, "No rills, slips, or mass movement", "LCC Strategy 2013 Table 6", "PASS");
+  }
+
+  // --- 2. BUFFER DISTANCES (s5.4.1f & Table 6) ---
   if (se.dist_perennial_watercourse_m != null) {
-    const ok = Number(se.dist_perennial_watercourse_m) >= 100;
-    if (!ok) { needsSec = true; departures.push(`Watercourse buffer (${se.dist_perennial_watercourse_m} m) < 100 m.`); }
-    add("BUF-WATER", "Buffers", "Perennial/Intermittent Watercourse", `${se.dist_perennial_watercourse_m} m`, ">= 100 m", "LCC Strategy 2013 s5.4.1(f)", ok ? "PASS" : "LIMITATION");
-  }
-  if (se.dist_property_boundary_m != null) {
-    const req = isEta ? (se.boundary_is_downgradient ? 6 : 12) : (se.boundary_is_downgradient ? 3 : 6);
-    const ok = Number(se.dist_property_boundary_m) >= req;
-    if (!ok) { needsSec = true; departures.push(`Boundary setback (${se.dist_property_boundary_m} m) < ${req} m.`); }
-    add("BUF-BOUNDARY", "Buffers", "Property Boundary Setback", `${se.dist_property_boundary_m} m`, `>= ${req} m`, "LCC Strategy 2013 Table 6", ok ? "PASS" : "LIMITATION");
+    const req = bufs.perennial_or_intermittent_watercourse.required_m;
+    const val = Number(se.dist_perennial_watercourse_m);
+    if (val < req) {
+      needsSec = true;
+      departures.push(`LAA is ${val} m from perennial/intermittent watercourse (< ${req} m buffer).`);
+      add("BUF-WATER", "Buffers", "Perennial/Intermittent Watercourse", `${val} m`, `>= ${req} m`, bufs.perennial_or_intermittent_watercourse.clause, "LIMITATION", "Maximise buffer distance and provide secondary treatment (with disinfection if required).");
+    } else {
+      add("BUF-WATER", "Buffers", "Perennial/Intermittent Watercourse", `${val} m`, `>= ${req} m`, bufs.perennial_or_intermittent_watercourse.clause, "PASS");
+    }
+  } else if (sp.nearest_watercourse_m != null) {
+    const req = bufs.perennial_or_intermittent_watercourse.required_m;
+    const val = Number(sp.nearest_watercourse_m);
+    const st = val >= req ? "PASS" : "INFO";
+    add("BUF-WATER-GIS", "Buffers", "Nearest Mapped Watercourse (Parcel Edge)", `${val.toFixed(1)} m`, `>= ${req} m from LAA`, bufs.perennial_or_intermittent_watercourse.clause, st, "Confirm exact LAA-to-watercourse setback on site plan.");
   }
 
-  // Boreholes & Soil
-  const bhs = inp.boreholes || [];
-  const minDepth = bhs.length ? Math.min(...bhs.map((b) => Math.max(0, ...(b.horizons || []).map((h) => Number(h.depth_bottom_mm || 0))))) : 0;
-  if (bhs.length < 2 || minDepth < 1000) {
-    departures.push(`Boreholes (${bhs.length}, min depth ${minDepth} mm) below LCC Strategy s5.4.3 minimum (2 boreholes to >= 1000 mm).`);
-    add("SOIL-BOREHOLES", "Soil", "Boreholes & Depth", `${bhs.length} BH, min ${minDepth} mm`, ">= 2 BH to >= 1000 mm", "LCC Strategy 2013 s5.4.3 p.35", "LIMITATION");
+  if (se.dist_gully_m != null) {
+    const req = bufs.gully_ephemeral.required_m;
+    const val = Number(se.dist_gully_m);
+    if (val < req) {
+      needsSec = true;
+      departures.push(`LAA is ${val} m from ephemeral gully (< ${req} m buffer).`);
+      add("BUF-GULLY", "Buffers", "Gully / Ephemeral Stream", `${val} m`, `>= ${req} m`, bufs.gully_ephemeral.clause, "LIMITATION", "Maximise buffer and provide secondary treatment.");
+    } else {
+      add("BUF-GULLY", "Buffers", "Gully / Ephemeral Stream", `${val} m`, `>= ${req} m`, bufs.gully_ephemeral.clause, "PASS");
+    }
+  }
+
+  if (se.dist_domestic_bore_m != null) {
+    const req = bufs.domestic_groundwater_bore.required_m;
+    const val = Number(se.dist_domestic_bore_m);
+    const st = val >= req ? "PASS" : "LIMITATION";
+    if (st === "LIMITATION") {
+      needsSec = true;
+      departures.push(`LAA is ${val} m from domestic groundwater bore (< ${req} m buffer).`);
+    }
+    add("BUF-BORE", "Buffers", "Domestic Groundwater Bore/Well", `${val} m`, `>= ${req} m`, bufs.domestic_groundwater_bore.clause, st);
+  }
+
+  if (se.dist_property_boundary_m != null) {
+    const isDown = se.boundary_is_downgradient !== false;
+    const key = isEta
+      ? isDown ? "property_boundary_eta_downgradient" : "property_boundary_eta_upgradient"
+      : isDown ? "property_boundary_ssi_downgradient" : "property_boundary_ssi_upgradient";
+    const req = bufs[key].required_m;
+    const val = Number(se.dist_property_boundary_m);
+    const st = val >= req ? "PASS" : "LIMITATION";
+    if (st === "LIMITATION") {
+      needsSec = true;
+      departures.push(`LAA setback to property boundary (${val} m) is below ${req} m requirement.`);
+    }
+    add("BUF-BOUNDARY", "Buffers", "Property Boundary Setback", `${val} m`, `>= ${req} m`, bufs[key].clause, st);
+  }
+
+  if (se.septic_to_dwelling_m != null) {
+    const req = bufs.septic_tank_to_building.required_m;
+    const val = Number(se.septic_to_dwelling_m);
+    const st = val >= req ? "PASS" : "FAIL";
+    add("BUF-SEPTIC", "Buffers", "Septic Tank to Building", `${val} m`, `> ${req} m`, bufs.septic_tank_to_building.clause, st);
+  }
+
+  // --- 3. SOIL LIMITATIONS (Table 7 & s5.4.2) ---
+  const morandCode = String(inp.morand_code || "co").toLowerCase();
+  const morand = rules.morand_soil_units[morandCode] || {};
+  if (morand.unsuitable) {
+    departures.push(`Morand soil unit '${morand.unit}' (${morandCode}) is flagged unsuitable for standard effluent disposal (Strategy Table 1).`);
+    add("SOIL-MORAND", "Soil", "Morand (1994) Soil Unit", `${morand.unit} (${morandCode})`, "Suitable soil landscape", "LCC Strategy 2013 Table 1", "FAIL", morand.limitations || null);
   } else {
-    add("SOIL-BOREHOLES", "Soil", "Boreholes & Depth", `${bhs.length} BH, min ${minDepth} mm`, ">= 2 BH to >= 1000 mm", "LCC Strategy 2013 s5.4.3 p.35", "PASS");
+    add("SOIL-MORAND", "Soil", "Morand (1994) Soil Unit", `${morand.unit || morandCode} (${morandCode}) — P-sorption ${Number(model.p_sorption_kg_ha_m || 0).toLocaleString()} kg/ha/m`, "Identify desktop soil unit & limitations", "LCC Strategy 2013 s5.4.2 Table 1", "PASS", morand.limitations || null);
+  }
+
+  const bhs = inp.boreholes || [];
+  const minDepth = bhs.length
+    ? Math.min(...bhs.map((b) => Math.max(0, ...(b.horizons || []).map((h) => Number(h.depth_bottom_mm || 0)))))
+    : 0;
+  if (bhs.length < limits.min_boreholes || minDepth < limits.min_borehole_depth_mm) {
+    departures.push(`Borehole assessment has ${bhs.length} borehole(s) (min depth ${minDepth} mm); Lismore Strategy s5.4.3 requires minimum 2 boreholes to >= 1000 mm.`);
+    add(
+      "SOIL-BOREHOLES", "Soil", "Borehole Coverage & Depth",
+      `${bhs.length} borehole(s), min depth ${minDepth} mm`,
+      ">= 2 boreholes to >= 1000 mm depth",
+      "LCC Strategy 2013 s5.4.2(h) & s5.4.3 p.35",
+      "LIMITATION",
+      "Complete second borehole to >= 1000 mm across LAA high/low points prior to lodgement.",
+    );
+  } else {
+    add("SOIL-BOREHOLES", "Soil", "Borehole Coverage & Depth", `${bhs.length} boreholes, min depth ${minDepth} mm`, ">= 2 boreholes to >= 1000 mm", "LCC Strategy 2013 s5.4.3 p.35", "PASS");
   }
 
   const allH = bhs.flatMap((b) => b.horizons || []);
-  const worstDisp = allH.reduce((m, h) => Math.max(m, Number(h.dispersive_class || 1)), 1);
+  const worstDisp = allH.reduce((m, h) => (h.dispersive_class != null ? Math.max(m, Number(h.dispersive_class)) : m), 1);
+  const minPh = allH.reduce((m, h) => (h.ph != null ? Math.min(m, Number(h.ph)) : m), 6.5);
+  const maxCf = allH.reduce((m, h) => Math.max(m, Number(h.coarse_fragments_pct || 0)), 0.0);
+
   if (worstDisp >= 3) {
     needsSec = true;
     needsGypsum = true;
-    add("SOIL-DISP", "Soil", "Dispersiveness (Emerson SAR 5)", `Class ${worstDisp}`, "Class 1 or 2", "LCC Strategy 2013 s5.4.2(g) & Table 7", "LIMITATION", "Apply gypsum @ 1.0 kg/m2 across ETA base.");
+    add(
+      "SOIL-DISP", "Soil", "Dispersiveness (Modified Emerson SAR 5)",
+      `Class ${worstDisp}`, "Class 1 or 2 (non-dispersive)",
+      "LCC Strategy 2013 s5.4.2(g) & Table 7", "LIMITATION",
+      "Provide secondary treatment and ameliorate disposal area base with gypsum at 1.0 kg/m2; recommend low-sodium detergents.",
+    );
   } else {
-    add("SOIL-DISP", "Soil", "Dispersiveness (Emerson SAR 5)", `Class ${worstDisp}`, "Class 1 or 2", "LCC Strategy 2013 s5.4.2(g) & Table 7", "PASS");
+    add("SOIL-DISP", "Soil", "Dispersiveness (Modified Emerson SAR 5)", `Class ${worstDisp}`, "Class 1 or 2", "LCC Strategy 2013 s5.4.2(g) & Table 7", "PASS");
   }
 
-  const minPh = allH.reduce((m, h) => (h.ph != null ? Math.min(m, Number(h.ph)) : m), 6.5);
-  add("SOIL-PH", "Soil", "Field pH", `${minPh.toFixed(1)}`, "> 5.5", "LCC Strategy 2013 Table 7", minPh <= 5.5 ? "LIMITATION" : "PASS");
+  if (minPh <= limits.ideal_ph_min) {
+    needsSec = true;
+    add(
+      "SOIL-PH", "Soil", "Field pH", `${minPh.toFixed(1)}`, "> 5.5 (ideal 6.5 - 8.0)",
+      "LCC Strategy 2013 s5.4.2(f) & Table 7", "LIMITATION",
+      "Secondary treatment; condition topsoil with agricultural lime if pH < 5.5 to assist plant nutrient uptake.",
+    );
+  } else {
+    add("SOIL-PH", "Soil", "Field pH", `${minPh.toFixed(1)}`, "> 5.5", "LCC Strategy 2013 s5.4.2(f) & Table 7", "PASS");
+  }
 
-  // Treatment & LAA
+  if (maxCf > 20.0) {
+    add(
+      "SOIL-COARSE", "Soil", "Coarse Fragments", `${Math.round(maxCf)}%`, "< 20% of soil volume",
+      "LCC Strategy 2013 Table 5 & Table 7", "LIMITATION",
+      "Increase Soil Category by one class if larger pores are absent.",
+    );
+  } else {
+    add("SOIL-COARSE", "Soil", "Coarse Fragments", `${Math.round(maxCf)}%`, "< 20% of soil volume", "LCC Strategy 2013 Table 5 & Table 7", "PASS");
+  }
+
+  if (model.soil_category >= 6) {
+    needsSec = true;
+    add(
+      "SOIL-CAT", "Soil", "Soil Category (Most Limiting Layer)", `Category ${model.soil_category} (${model.soil_texture_name})`,
+      "Categories 1-5", "LCC Strategy 2013 s5.4.4 & Table 7", "LIMITATION",
+      "Secondary treatment required; ameliorate dispersive clays with gypsum and model conservatively.",
+    );
+  } else {
+    add("SOIL-CAT", "Soil", "Soil Category (Most Limiting Layer)", `Category ${model.soil_category} (${model.soil_texture_name})`, "Categories 1-5", "LCC Strategy 2013 Table 4 & Table 7", "PASS");
+  }
+
+  const wtDepth = Number(se.depth_to_water_table_m ?? 3.0);
+  if (wtDepth < 1.0) {
+    needsSec = true;
+    add("SOIL-DEPTH", "Soil", "Depth to Water Table / Bedrock", `${wtDepth.toFixed(1)} m`, ">= 1.0 m", "LCC Strategy 2013 s5.4.2(h) & Table 7", "LIMITATION", "Secondary treatment with disinfection and shallow sub-surface irrigation or mound system.");
+  } else {
+    add("SOIL-DEPTH", "Soil", "Depth to Water Table / Bedrock", `${wtDepth.toFixed(1)} m`, ">= 1.0 m", "LCC Strategy 2013 s5.4.2(h) & Table 7", "PASS");
+  }
+
+  // --- 4. TREATMENT & LAND APPLICATION RULES ---
+  const isSecondary = inp.treatment_system !== "primary_septic";
+  if (needsSec && !isSecondary) {
+    departures.push("Site/soil limitations trigger secondary treatment, but Primary-only system is nominated.");
+    add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system, "Secondary treatment required", "LCC Strategy 2013 Tables 6 & 7", "FAIL", "Upgrade to Reed Bed or NSW Health accredited AWTS.");
+  } else {
+    add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system, "Appropriate for site/soil class", "LCC Strategy 2013 Appendix A", "PASS");
+  }
+
   if (inp.treatment_system === "secondary_reed_bed") {
-    const ok = model.reed_bed_hrt_days >= 5.0;
-    add("TRT-RB-HRT", "Treatment", "Reed Bed HRT & N Removal", `${model.reed_bed_hrt_days} d (${model.n_removal_pct}% N)`, ">= 5.0 days & >= 50% N", "LCC Strategy 2013 Appendix A s4.0", ok ? "PASS" : "FAIL");
+    if (model.reed_bed_hrt_days < limits.reed_bed_min_hrt_days_secondary) {
+      departures.push(`Reed bed HRT (${model.reed_bed_hrt_days} d) is below 5-day minimum for secondary treatment.`);
+      add("TRT-RB-HRT", "Treatment", "Reed Bed Hydraulic Retention Time", `${model.reed_bed_hrt_days} days`, ">= 5.0 days (7.0 days standard)", "LCC Strategy 2013 Appendix A s4.0", "FAIL", "Increase reed bed tray area or wetted depth.");
+    } else {
+      add("TRT-RB-HRT", "Treatment", "Reed Bed Hydraulic Retention Time", `${model.reed_bed_hrt_days} days (N removal ${model.n_removal_pct}%)`, ">= 5.0 days & >= 50% N removal", "LCC Strategy 2013 Appendix A s4.0 & Reed Bed Guide s3.0", "PASS");
+    }
   }
+
   if (isEta) {
-    add("LAA-LEN", "Land Application", "ETA Bed Length", `${model.trench_layout.trench_length_m} m`, "<= 20.0 m (centrally fed)", "LCC Strategy 2013 Appendix B Design 1", model.trench_layout.exceeds_max_length_20m ? "FAIL" : "PASS");
+    if (model.trench_layout.exceeds_max_length_20m) {
+      departures.push(`ETA bed length (${model.trench_layout.trench_length_m} m) exceeds 20 m maximum (Appendix B Design 1).`);
+      add("LAA-LEN", "Land Application", "ETA Bed Length", `${model.trench_layout.trench_length_m} m`, "<= 20.0 m (centrally fed)", "LCC Strategy 2013 Appendix B Design 1", "FAIL", "Split LAA into additional parallel trenches separated by >= 2.0 m.");
+    } else {
+      add("LAA-LEN", "Land Application", "ETA Bed Length", `${model.trench_layout.trench_length_m} m`, "<= 20.0 m (centrally fed)", "LCC Strategy 2013 Appendix B Design 1", "PASS");
+    }
+
     if (model.trench_layout.exceeds_3_trenches) {
-      add("LAA-TRENCHES", "Land Application", "Number of ETA Beds", `${model.trench_layout.number_of_trenches}`, "<= 3 via distribution box", "LCC Strategy 2013 Appendix B s3.0", "LIMITATION", "Use indexing valve / pressurised manifold.");
+      add("LAA-TRENCHES", "Land Application", "Number of ETA Trenches", String(model.trench_layout.number_of_trenches), "<= 3 via distribution box", "LCC Strategy 2013 Appendix B s3.0", "LIMITATION", "Use indexing valve / dosing manifold rather than passive distribution box.");
+    } else {
+      add("LAA-TRENCHES", "Land Application", "Number of ETA Trenches", String(model.trench_layout.number_of_trenches), "<= 3 via distribution box", "LCC Strategy 2013 Appendix B s3.0", "PASS");
     }
   } else {
     add("LAA-ZONE", "Land Application", "Contiguous Irrigation Zone", `${model.trench_layout.trench_length_m} m × ${model.trench_layout.trench_width_m} m (${model.required_laa_m2} m²)`, "Tertiary disinfected effluent + CIDP", "LCC Strategy 2013 Appendix B s4.0", "PASS");
-    add("PLAN-CIDP", "Land Application", "Certified Irrigation Design Plan", "Required for SDI / Spray", "Appendix C & D certified by CID", "LCC Strategy 2013 Part B s1.1", "LIMITATION");
   }
-  add("LAA-RESERVE", "Land Application", "Reserve LAA (100%)", se.reserve_laa_available ? `Available (${model.reserve_laa_m2} m²)` : "Missing", "100% alternate LAA nominated", "LCC Strategy 2013 Part B s1.1", se.reserve_laa_available ? "PASS" : "FAIL");
 
-  if (spatial?.drinking_water_catchment) {
-    departures.push("Drinking Water Catchment: Rous Water Guidelines (2008) apply.");
-    add("PLAN-DWC", "Planning", "Drinking Water Catchment", "Inside Catchment", "Rous Water Guidelines", "LCC Strategy 2013 Part B s1.1", "LIMITATION");
+  const reserveAvailable = se.reserve_laa_available !== false;
+  if (!reserveAvailable) {
+    departures.push("No alternate (reserve) land application area nominated (Strategy s1.1).");
+    add("LAA-RESERVE", "Land Application", "Reserve LAA", "Not available", `>= ${model.reserve_laa_m2} m2 nominated`, "LCC Strategy 2013 Part B s1.1", "FAIL");
   } else {
-    add("PLAN-DWC", "Planning", "Drinking Water Catchment", "Outside Catchment", "Rous Water if inside", "LCC Strategy 2013 Part B s1.1", "PASS");
+    add("LAA-RESERVE", "Land Application", "Reserve LAA", `Available (>= ${model.reserve_laa_m2} m2)`, "Alternate reserve LAA nominated", "LCC Strategy 2013 Part B s1.1", "PASS");
   }
 
+  // --- 5. PLANNING OVERLAYS (Rous Water, ASS, Irrigation Certification) ---
+  const requiresCidp = !isEta;
+  if (sp.drinking_water_catchment) {
+    departures.push("Property lies within a mapped Drinking Water Catchment — Rous Water On-site Wastewater Management Guidelines (2008) apply.");
+    add("PLAN-DWC", "Planning", "Drinking Water Catchment", "Mapped Inside Catchment", "Comply with Rous Water Guidelines (2008)", "LCC Strategy 2013 Part B s1.1 & s5.1", "LIMITATION", "Include Rous Water Guidelines risk assessment and enhanced pathogen/nutrient barriers.");
+  } else {
+    add("PLAN-DWC", "Planning", "Drinking Water Catchment", "Outside mapped catchment", "Rous Water Guidelines if inside", "LCC Strategy 2013 Part B s1.1", "PASS");
+  }
+
+  const assList = Array.isArray(sp.acid_sulfate_soils) ? sp.acid_sulfate_soils : [];
+  if (assList.length > 0) {
+    add("PLAN-ASS", "Planning", "Acid Sulfate Soils (ASS)", assList.join(", "), "Check ASS Risk Map for excavation", "LCC Strategy 2013 s5.4.2(i)", "LIMITATION", "Limit excavation depth and prepare ASS management notes if below threshold.");
+  } else {
+    add("PLAN-ASS", "Planning", "Acid Sulfate Soils (ASS)", "None mapped", "Check ASS Risk Map", "LCC Strategy 2013 s5.4.2(i)", "PASS");
+  }
+
+  if (requiresCidp) {
+    add("PLAN-CIDP", "Land Application", "Certified Irrigation Design Plan (CIDP)", "Irrigation nominated", "Appendix C & D certified by CID", "LCC Strategy 2013 Part B s1.1 & Appendix B s4.0", "LIMITATION", "Attach Certified Irrigation Design Plan (A3 1:200 & 1:250) with Appendix C & D checklists.");
+  }
+
+  // --- 6. MULTI-USE / AGRITOURISM / COMMERCIAL & GREASE ARRESTOR CHECKS ---
   const requiresGrease = (model.grease_arrestor_min_l || 0) > 0;
   const requiresCommercial = Boolean(model.exceeds_commercial_threshold_2000ld) || (model.source_breakdown || []).some((s) => s.source_type === "food_processing_commercial");
 
   if (requiresGrease) {
-    add("COMM-GREASE", "Commercial", "Commercial Grease Arrestor (FOG)", `${model.grease_arrestor_min_l} L Grease Arrestor`, ">= 1,000 L upstream of septic", "AS/NZS 3500.2 & NSW Liquid Trade Waste", "PASS", "Pump out every 3–6 months via licensed liquid waste contractor.");
+    add("COMM-GREASE", "Commercial", "Commercial Grease Arrestor (FOG Pre-Treatment)", `${model.grease_arrestor_min_l} L Grease Arrestor nominated`, ">= 1,000 L pre-treatment prior to septic/secondary tank", "AS/NZS 3500.2 & NSW Liquid Trade Waste Guidelines", "PASS", "Pump out grease arrestor every 3–6 months via licensed liquid waste contractor; retain dockets for Council.");
   }
   if ((model.surge_tank_min_l || 0) > 0) {
-    add("COMM-SURGE", "Commercial", "Surge / Balance Tank", `${model.surge_tank_min_l} L Balance Tank`, "Attenuate weekend / batch peak surges", "AS/NZS 1547 Appendix H", "PASS");
+    add("COMM-SURGE", "Commercial", "Flow Equalisation / Surge Balance Tank", `${model.surge_tank_min_l} L Balance Tank nominated`, "Attenuate peak weekend / batch hydraulic surges", "AS/NZS 1547:2012 Appendix H & LCC Strategy s5.3", "PASS", "Time-dose treated/primary effluent evenly across 24 hours to prevent hydraulic shock to reed bed and LAA.");
   }
   if (model.exceeds_commercial_threshold_2000ld) {
-    departures.push(`Combined design flow (${model.total_flow_ld} L/d; ${model.design_persons} EP) exceeds 2,000 L/d / 10 EP domestic threshold — commercial engineering review & NSW Health commercial accreditation check required.`);
-    add("COMM-FLOW", "Commercial", "Commercial / Multi-Use Flow Threshold", `${model.total_flow_ld} L/d (${model.design_persons} EP)`, "<= 2,000 L/d or <= 10 EP", "LCC Strategy Part A s1.2 & NSW Health", "LIMITATION");
+    departures.push(
+      `Combined daily design flow (${Math.round(model.total_flow_ld)} L/d; ${model.design_persons} EP) exceeds single-household ` +
+      `2,000 L/d / 10 EP threshold — commercial/multi-use engineering review & NSW Health commercial accreditation check required.`,
+    );
+    add("COMM-FLOW", "Commercial", "Commercial / Multi-Use Flow Threshold", `${Math.round(model.total_flow_ld)} L/day (${model.design_persons} EP)`, "<= 2,000 L/d or <= 10 EP for standard domestic pathway", "LCC Strategy 2013 Part A s1.2 & NSW Health Accreditation", "LIMITATION", "Provide commercial-scale treatment specification, surge equalisation, and Council pre-lodgement consultation.");
   }
 
   return {
@@ -532,8 +850,8 @@ export function auditLismoreComplianceJS(inp, spatial, model, rules) {
     requires_secondary_treatment: needsSec,
     requires_gypsum: needsGypsum,
     gypsum_rate_kg_m2: needsGypsum ? 1.0 : 0.0,
-    requires_rous_water_assessment: Boolean(spatial?.drinking_water_catchment),
-    requires_certified_irrigation_design: !isEta,
+    requires_rous_water_assessment: Boolean(sp.drinking_water_catchment),
+    requires_certified_irrigation_design: requiresCidp,
     requires_grease_arrestor: requiresGrease,
     requires_commercial_assessment: requiresCommercial,
     departures_from_strategy: departures,
@@ -799,8 +1117,8 @@ export function renderCadLayoutSvg(inp, model) {
 
     <!-- Title Footer -->
     <rect x="14" y="${H - 44}" width="${W - 28}" height="34" fill="#f7f5ef" stroke="#143628" stroke-width="1.2" />
-    <text x="24" y="${H - 23}" font-size="10.5" font-weight="700" fill="#143628">
-      Field To Forest Environmental Consulting  |  Flow: ${model.total_flow_ld} L/d  |  Required LAA: ${model.required_laa_m2} m² (${escXml(model.limiting_factor)})  |  Ref: ${escXml(inp.project_ref)}
+    <text x="24" y="${H - 23}" font-size="10.2" font-weight="700" fill="#143628">
+      Field To Forest Environmental Consulting  |  Flow: ${model.total_flow_ld} L/d  |  LAA: ${model.required_laa_m2} m² (${escXml(model.limiting_factor)})  |  Ref: ${escXml(inp.project_ref)}${(inp.field_pins || []).some((p) => p.northing_mga56 && Math.abs(p.northing_mga56) > 1000) ? `  |  ${(inp.field_pins || []).length} MGA56 Pin(s)` : ""}
     </text>
   </svg>`;
 }

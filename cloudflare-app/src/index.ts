@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   buildLogoutCookieHeader,
+  buildSafeFileResponseHeaders,
   buildSessionCookieHeader,
   checkRateLimit,
   createSignedSessionToken,
@@ -10,6 +11,7 @@ import {
   renderAdminLoginHtml,
   SESSION_COOKIE_NAME,
   verifyAdminPassword,
+  verifyCloudflareAccessJwt,
   verifySignedSessionToken,
 } from "./auth";
 import {
@@ -34,6 +36,8 @@ export interface Env {
   ADMIN_PASSWORD?: string;
   SESSION_SECRET?: string;
   TRUST_CF_ACCESS?: string;
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -74,11 +78,20 @@ app.use("*", async (c, next) => {
       }
       // On localhost without ADMIN_PASSWORD in .dev.vars, allow frictionless local development
     } else {
-      const cfAccessEmail = c.env.TRUST_CF_ACCESS === "true" ? c.req.header("cf-access-authenticated-user-email") : null;
       const token = extractCookie(c.req.header("cookie"), SESSION_COOKIE_NAME);
       const validCookie = token ? await verifySignedSessionToken(token, signingSecret) : false;
 
-      if (!validCookie && !cfAccessEmail) {
+      let validAccessJwt = false;
+      if (!validCookie && c.env.TRUST_CF_ACCESS === "true") {
+        const accessRes = await verifyCloudflareAccessJwt(
+          c.req.header("cf-access-jwt-assertion"),
+          c.env.CF_ACCESS_TEAM_DOMAIN,
+          c.env.CF_ACCESS_AUD,
+        );
+        validAccessJwt = accessRes.valid;
+      }
+
+      if (!validCookie && !validAccessJwt) {
         if (isApiOrAsset) {
           return c.json({ error: "Unauthorized — Consultant sign-in required." }, 401);
         }
@@ -606,6 +619,24 @@ app.put("/consulting/api/jobs/:id", async (c) => {
   return c.json({ id, updated: true, status });
 });
 
+const ALLOWED_JOB_STATUSES = new Set(["precheck", "field", "drafted", "qa", "lodged", "approved"]);
+
+app.patch("/consulting/api/jobs/:id/status", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{ status?: string }>().catch(() => ({ status: "" }));
+  const status = String(body.status || "").trim().toLowerCase();
+  if (!ALLOWED_JOB_STATUSES.has(status)) {
+    return c.json({ error: "Invalid status value." }, 400);
+  }
+  const res = await c.env.DB.prepare(
+    `UPDATE jobs SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), status = ? WHERE id = ?`,
+  )
+    .bind(status, id)
+    .run();
+  if (!res.meta.changes) return c.json({ error: "Job not found" }, 404);
+  return c.json({ id, status, updated: true });
+});
+
 app.delete("/consulting/api/jobs/:id", async (c) => {
   const id = c.req.param("id");
   const job = await c.env.DB.prepare("SELECT id, project_ref FROM jobs WHERE id = ?")
@@ -651,16 +682,37 @@ app.delete("/consulting/api/jobs/:id", async (c) => {
 // R2 FILE STORAGE (Site Photos, Voice Memos, Generated .docx / .dxf / Maps)
 // ============================================================================
 
+const ALLOWED_FILE_KINDS = new Set([
+  "photo",
+  "audio",
+  "docx",
+  "dxf",
+  "gis_map",
+  "cad_plan",
+  "audit_json",
+  "client_doc",
+]);
+const MAX_R2_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB per file
+
 app.post("/consulting/api/jobs/:id/files", async (c) => {
   const jobId = c.req.param("id");
+  const jobExists = await c.env.DB.prepare("SELECT id FROM jobs WHERE id = ?").bind(jobId).first<{ id: string }>();
+  if (!jobExists) {
+    return c.json({ error: "Job not found" }, 404);
+  }
+
   const form = await c.req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
     return c.json({ error: "Multipart form field 'file' is required." }, 400);
   }
+  if (file.size > MAX_R2_UPLOAD_BYTES) {
+    return c.json({ error: `File exceeds maximum allowed upload size (${MAX_R2_UPLOAD_BYTES / (1024 * 1024)} MB).` }, 413);
+  }
 
-  const kind = String(form.get("kind") ?? "photo");
-  const caption = form.get("caption") ? String(form.get("caption")) : null;
+  const rawKind = String(form.get("kind") ?? "photo").trim();
+  const kind = ALLOWED_FILE_KINDS.has(rawKind) ? rawKind : "client_doc";
+  const caption = form.get("caption") ? String(form.get("caption")).slice(0, 500) : null;
   const lat = form.get("lat") ? Number(form.get("lat")) : null;
   const lon = form.get("lon") ? Number(form.get("lon")) : null;
 
@@ -695,12 +747,19 @@ app.post("/consulting/api/jobs/:id/files", async (c) => {
 });
 
 app.get("/consulting/api/files/*", async (c) => {
-  const key = c.req.path.replace(/^\/consulting\/api\/files\//, "");
+  const key = decodeURIComponent(c.req.path.replace(/^\/consulting\/api\/files\//, ""));
+  if (!key || key.includes("..") || !key.startsWith("jobs/")) {
+    return c.json({ error: "Invalid file key" }, 400);
+  }
   const obj = await c.env.FILES.get(key);
   if (!obj) return c.json({ error: "File not found" }, 404);
 
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
+  const safeHeaders = buildSafeFileResponseHeaders(obj.httpMetadata?.contentType, key);
+  for (const [k, v] of Object.entries(safeHeaders)) {
+    headers.set(k, v);
+  }
   headers.set("etag", obj.httpEtag);
   return new Response(obj.body, { headers });
 });

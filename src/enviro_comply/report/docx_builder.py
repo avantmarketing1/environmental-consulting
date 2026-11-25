@@ -16,12 +16,24 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement, parse_xml
-from docx.oxml.ns import nsdecls, qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt
 
+from enviro_comply.report.docx_styles import (
+    ACCENT_BLUE,
+    MUTED,
+    NAVY,
+    add_bullet as _add_bullet,
+    add_callout as _add_callout,
+    add_document_control_table,
+    add_dynamic_toc_field,
+    add_figure as _add_figure,
+    add_grid_table as _add_grid_table,
+    add_heading as _add_heading,
+    add_kv_table as _add_kv_table,
+    add_photo_grid,
+    configure_document_styles,
+    configure_header_footer,
+)
 from enviro_comply.schemas.ossm import (
     ComplianceAuditResult,
     LandApplicationType,
@@ -30,207 +42,6 @@ from enviro_comply.schemas.ossm import (
     TreatmentSystemType,
     WastewaterModelResult,
 )
-
-NAVY = RGBColor(0x0D, 0x24, 0x1B)       # Deep Field To Forest green-charcoal
-BRAND_TEAL = RGBColor(0x14, 0x36, 0x28)
-ACCENT_BLUE = RGBColor(0x03, 0x69, 0xA1)
-SLATE = RGBColor(0x33, 0x41, 0x55)
-MUTED = RGBColor(0x64, 0x74, 0x8B)
-GREEN = RGBColor(0x16, 0x65, 0x34)
-AMBER = RGBColor(0x92, 0x40, 0x0E)
-RED = RGBColor(0x99, 0x1B, 0x1B)
-
-
-def _shade_cell(cell, hex_fill: str) -> None:
-    shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{hex_fill}"/>')
-    cell._tc.get_or_add_tcPr().append(shading)
-
-
-def _set_table_borders(table, color: str = "CBD5E1") -> None:
-    tbl_pr = table._tbl.tblPr
-    borders = parse_xml(
-        f'<w:tblBorders {nsdecls("w")}>'
-        f'<w:top w:val="single" w:sz="6" w:space="0" w:color="{color}"/>'
-        f'<w:left w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="{color}"/>'
-        f'<w:right w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:insideH w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f'<w:insideV w:val="single" w:sz="4" w:space="0" w:color="{color}"/>'
-        f"</w:tblBorders>"
-    )
-    tbl_pr.append(borders)
-
-
-def _add_heading(doc: Document, text: str, level: int = 1) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(14 if level == 1 else 10)
-    p.paragraph_format.space_after = Pt(5)
-    p.paragraph_format.keep_with_next = True
-    run = p.add_run(text)
-    run.bold = True
-    run.font.name = "Calibri"
-    run.font.size = Pt(14 if level == 1 else (11.5 if level == 2 else 10.5))
-    run.font.color.rgb = NAVY if level <= 2 else ACCENT_BLUE
-    if level == 1:
-        pPr = p._p.get_or_add_pPr()
-        pBdr = parse_xml(
-            f'<w:pBdr {nsdecls("w")}><w:bottom w:val="single" w:sz="8" w:space="3" w:color="143628"/></w:pBdr>'
-        )
-        pPr.append(pBdr)
-
-
-def _add_callout(doc: Document, title: str, body: str, fill_hex: str = "F0FDF4", border_hex: str = "166534") -> None:
-    tbl = doc.add_table(rows=1, cols=1)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    cell = tbl.rows[0].cells[0]
-    cell.width = Inches(6.7)
-    _shade_cell(cell, fill_hex)
-    tc_pr = cell._tc.get_or_add_tcPr()
-    borders = parse_xml(
-        f'<w:tcBorders {nsdecls("w")}>'
-        f'<w:top w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f'<w:left w:val="single" w:sz="18" w:space="0" w:color="{border_hex}"/>'
-        f'<w:bottom w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f'<w:right w:val="single" w:sz="4" w:space="0" w:color="{border_hex}"/>'
-        f"</w:tcBorders>"
-    )
-    tc_pr.append(borders)
-    p = cell.paragraphs[0]
-    p.paragraph_format.space_before = Pt(5)
-    p.paragraph_format.space_after = Pt(5)
-    rt = p.add_run(f"{title}: ")
-    rt.bold = True
-    rt.font.size = Pt(9.5)
-    rt.font.color.rgb = NAVY
-    rb = p.add_run(body)
-    rb.font.size = Pt(9.5)
-    rb.font.color.rgb = SLATE
-
-
-def _add_kv_table(doc: Document, rows: list[tuple[str, str]], col_widths=(2.4, 4.3)) -> None:
-    tbl = doc.add_table(rows=len(rows), cols=2)
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_borders(tbl)
-    for idx, (k, v) in enumerate(rows):
-        row = tbl.rows[idx]
-        c0, c1 = row.cells[0], row.cells[1]
-        c0.width = Inches(col_widths[0])
-        c1.width = Inches(col_widths[1])
-        _shade_cell(c0, "F1F5F9")
-        p0 = c0.paragraphs[0]
-        p0.paragraph_format.space_before = Pt(3)
-        p0.paragraph_format.space_after = Pt(3)
-        r0 = p0.add_run(k)
-        r0.bold = True
-        r0.font.size = Pt(9.3)
-        r0.font.color.rgb = NAVY
-
-        p1 = c1.paragraphs[0]
-        p1.paragraph_format.space_before = Pt(3)
-        p1.paragraph_format.space_after = Pt(3)
-        r1 = p1.add_run(v)
-        r1.font.size = Pt(9.3)
-        r1.font.color.rgb = SLATE
-
-
-def _add_grid_table(doc: Document, headers: list[str], rows: list[list[str]], status_col: int | None = None) -> None:
-    tbl = doc.add_table(rows=len(rows) + 1, cols=len(headers))
-    tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_borders(tbl)
-
-    hdr_row = tbl.rows[0]
-    for j, h in enumerate(headers):
-        cell = hdr_row.cells[j]
-        _shade_cell(cell, "143628")
-        p = cell.paragraphs[0]
-        p.paragraph_format.space_before = Pt(4)
-        p.paragraph_format.space_after = Pt(4)
-        r = p.add_run(h)
-        r.bold = True
-        r.font.size = Pt(8.8)
-        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-
-    for i, rdata in enumerate(rows):
-        row = tbl.rows[i + 1]
-        bg = "FFFFFF" if i % 2 == 0 else "F8FAFC"
-        for j, val in enumerate(rdata):
-            cell = row.cells[j]
-            _shade_cell(cell, bg)
-            p = cell.paragraphs[0]
-            p.paragraph_format.space_before = Pt(3)
-            p.paragraph_format.space_after = Pt(3)
-            r = p.add_run(str(val))
-            r.font.size = Pt(8.6)
-            if status_col is not None and j == status_col:
-                r.bold = True
-                u = str(val).upper()
-                if u in ("PASS", "✓", "NO LIMITATION", "NO LIMITATIONS"):
-                    r.font.color.rgb = GREEN
-                    _shade_cell(cell, "DCFCE7")
-                elif u in ("LIMITATION", "×", "INFO", "MITIGATED"):
-                    r.font.color.rgb = AMBER
-                    _shade_cell(cell, "FEF3C7")
-                elif u == "FAIL":
-                    r.font.color.rgb = RED
-                    _shade_cell(cell, "FEE2E2")
-            else:
-                r.font.color.rgb = SLATE
-
-
-def _add_bullet(doc: Document, text: str, bold_prefix: str | None = None) -> None:
-    p = doc.add_paragraph(style="List Bullet")
-    p.paragraph_format.space_before = Pt(1.5)
-    p.paragraph_format.space_after = Pt(2)
-    if bold_prefix:
-        rb = p.add_run(bold_prefix)
-        rb.bold = True
-        rb.font.size = Pt(9.6)
-        rb.font.color.rgb = NAVY
-    r = p.add_run(text)
-    r.font.size = Pt(9.6)
-    r.font.color.rgb = SLATE
-
-
-def _add_figure(doc: Document, img_path: Path | None, caption: str, width_in: float = 6.5) -> bool:
-    if not img_path or not img_path.exists():
-        return False
-    p_img = doc.add_paragraph()
-    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_img.paragraph_format.space_before = Pt(6)
-    p_img.paragraph_format.space_after = Pt(3)
-    p_img.paragraph_format.keep_with_next = True
-    p_img.add_run().add_picture(str(img_path), width=Inches(width_in))
-
-    p_cap = doc.add_paragraph()
-    p_cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_cap.paragraph_format.space_before = Pt(0)
-    p_cap.paragraph_format.space_after = Pt(8)
-    rc = p_cap.add_run(caption)
-    rc.italic = True
-    rc.font.size = Pt(8.5)
-    rc.font.color.rgb = MUTED
-    return True
-
-
-def _add_page_number_footer(section, footer_left: str) -> None:
-    footer = section.footer
-    p = footer.paragraphs[0]
-    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    r1 = p.add_run(f"{footer_left}   |   Page ")
-    r1.font.size = Pt(8)
-    r1.font.color.rgb = MUTED
-
-    fld_page = OxmlElement("w:fldSimple")
-    fld_page.set(qn("w:instr"), "PAGE")
-    p._p.append(fld_page)
-
-    r2 = p.add_run(" of ")
-    r2.font.size = Pt(8)
-    r2.font.color.rgb = MUTED
-
-    fld_numpages = OxmlElement("w:fldSimple")
-    fld_numpages.set(qn("w:instr"), "NUMPAGES")
-    p._p.append(fld_numpages)
 
 
 def build_ossm_docx_report(
@@ -249,22 +60,38 @@ def build_ossm_docx_report(
     doc = Document()
     diagrams = diagrams or {}
     photo_items = photo_items or []
+    valid_photos = [(p, cap) for (p, cap) in photo_items if p and p.exists()]
 
-    # Global styling & margins
+    # Global styles, native Heading 1–3, and cover-isolated running header/footer
+    configure_document_styles(doc)
     section = doc.sections[0]
     section.top_margin = Inches(0.68)
     section.bottom_margin = Inches(0.68)
     section.left_margin = Inches(0.75)
     section.right_margin = Inches(0.75)
-    _add_page_number_footer(
-        section,
-        f"{inp.project_ref} — {inp.site_address} (Lot {inp.lot_number} {inp.plan_label})",
-    )
 
-    normal = doc.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal.font.size = Pt(9.8)
-    normal.font.color.rgb = SLATE
+    has_fail_checks = any(c.status == "FAIL" for c in audit.checks)
+    is_final_ready = bool(valid_photos) and bool(spatial.fetched_live) and not has_fail_checks
+    readiness_bits = []
+    if not spatial.fetched_live:
+        readiness_bits.append("Live NSW GIS pending")
+    if not valid_photos:
+        readiness_bits.append("Site photos pending")
+    if has_fail_checks:
+        readiness_bits.append("Compliance FAIL item(s) require resolution")
+    readiness_note = (
+        "All deterministic calculations, GIS overlays, drawings, and photographic evidence verified for Section 68 lodgement."
+        if is_final_ready
+        else "Pre-lodgement review copy (" + "; ".join(readiness_bits) + ")."
+    )
+    status_tag = "S68 FINAL" if is_final_ready else "DRAFT"
+
+    configure_header_footer(
+        section,
+        header_left=f"{inp.consultant.company or inp.consultant.name} — Section 68 OSSM Report",
+        header_right=f"{inp.project_ref} [{status_tag}]",
+        footer_left=f"{inp.project_ref} — {inp.site_address} (Lot {inp.lot_number} {inp.plan_label})",
+    )
 
     tr = model.trench_layout
     se = inp.site_eval
@@ -411,17 +238,19 @@ def build_ossm_docx_report(
     doc.add_page_break()
 
     # =========================================================================
-    # PAGE 2: TABLE OF CONTENTS / REPORT INDEX
+    # PAGE 2: DOCUMENT CONTROL & TABLE OF CONTENTS / REPORT INDEX
     # =========================================================================
     _add_heading(doc, "Table of Contents", level=1)
+    add_dynamic_toc_field(doc)
+
     toc_rows = [
         ["Up-Front", "Cover Sheet, Proposed Treatment Train & Up-Front Information Page", "LCC Strategy Part B s1.1"],
         ["Section 1", "Executive Summary, System Selection Justification & Departures", "LCC Strategy Part B s1.1 & s5.3"],
         ["Section 2", "Introduction, Site Context & Existing Infrastructure", "LCC Strategy Part B s1.1"],
         ["Section 3", "Desktop Spatial Assessment, Planning Overlays & GIS Site Location Map", "NSW Spatial Services / LEP"],
         ["Section 4", "Site Evaluation Form (Appendix E — Table 8)", "LCC Strategy Appendix E"],
-        ["Section 5", "Soil Assessment, Borehole Logs (Table 9) & Overall Limitation Matrix (Table 10)", "LCC Strategy Appendix E / Morand 1994"],
-        ["Section 6", "Lismore Daily Wastewater Model (OSmodel300614), DLR/LTR Calculation & LAA Layout", "LCC OSmodel / AS/NZS 1547 Table H3"],
+        ["Section 5", "Soil Assessment, Borehole Profile Graphic (Table 9) & Limitation Matrix (Table 10)", "LCC Strategy Appendix E / Morand 1994"],
+        ["Section 6", "Lismore Daily Wastewater Model (OSmodel300614), Charts & Officer Summary", "LCC OSmodel / AS/NZS 1547 Table H3"],
         ["Section 7", "Clause-Cited Regulatory Compliance Matrix", "LCC Strategy 2013 & AS/NZS 1547:2012"],
         ["Section 8", "Site Inspection Photographs & Pegged Layout Verification", "Field Evidence"],
         ["Section 9", "Proposed Works, Scaled CAD Layout Plan & Engineering Cross-Sections", "AS/NZS 1546.1 / LCC Appendices A–D"],
@@ -429,9 +258,19 @@ def build_ossm_docx_report(
         ["Section 11", "Ongoing Maintenance Schedule & Printable Service Record", "Approval to Operate (s68)"],
         ["Section 12", "Owner's Acknowledgement, Licensed Plumber Statutory Steps & Certification", "LG Act 1993 s68 / AS/NZS 3500"],
     ]
+    if audit.requires_rous_water_assessment or audit.requires_certified_irrigation_design or audit.requires_commercial_assessment:
+        toc_rows.append(["Appendices", "Triggered Statutory Compliance Modules (Rous Water / CIDP / Commercial)", "Rous Water 2008 / LCC App. C–D"])
     _add_grid_table(doc, ["Section", "Report Contents", "Regulatory Basis"], toc_rows)
 
     doc.add_paragraph()
+    add_document_control_table(
+        doc,
+        project_ref=inp.project_ref,
+        assessment_date_str=se.assessment_date.strftime("%d %B %Y"),
+        author_name=inp.consultant.name,
+        is_final_ready=is_final_ready,
+        readiness_note=readiness_note,
+    )
     _add_callout(
         doc,
         "Single-Source-of-Truth Verification",
@@ -591,7 +430,15 @@ def build_ossm_docx_report(
         ["Landform (Water Spreading)", se.landform_notes, "✓" if se.landform != "convergent" else "×"],
         ["Aspect & Sun/Wind Exposure", f"{se.aspect}; {se.exposure.replace('_', ' ')} sun/wind exposure", "✓" if not any(q in se.aspect.upper() for q in ("SOUTH", "SW", "SE")) else "×"],
         ["Boulders / Floaters / Rock Outcrops", se.boulders_rocks, "×" if se.boulders_limiting else "✓"],
-        ["Buffer Distances (Measured)", f"Gully: {se.dist_gully_m or '>40'} m | Watercourse: {se.dist_perennial_watercourse_m or '>100'} m | Bore: {se.dist_domestic_bore_m or '>100'} m | Boundary: {se.dist_property_boundary_m or '>12'} m | Dwelling: {se.dist_dwelling_m or '>15'} m", "✓" if not any(c.category == "Buffers" and c.status != "PASS" for c in audit.checks) else "×"],
+        [
+            "Buffer Distances (Measured)",
+            f"Gully: {f'{se.dist_gully_m} m' if se.dist_gully_m is not None else 'Not measured'} | "
+            f"Watercourse: {f'{se.dist_perennial_watercourse_m} m' if se.dist_perennial_watercourse_m is not None else 'Not measured'} | "
+            f"Bore: {f'{se.dist_domestic_bore_m} m' if se.dist_domestic_bore_m is not None else 'Not measured'} | "
+            f"Boundary: {f'{se.dist_property_boundary_m} m' if se.dist_property_boundary_m is not None else 'Not measured'} | "
+            f"Dwelling: {f'{se.dist_dwelling_m} m' if se.dist_dwelling_m is not None else 'Not measured'}",
+            "✓" if not any(c.category == "Buffers" and c.status != "PASS" for c in audit.checks) else "×",
+        ],
         ["Run-on & Upslope Seepage Control", se.run_on_diversion_proposed, "✓"],
         ["Run-off & Downslope Control", se.run_off_control_proposed, "✓"],
         ["Flooding Potential (1:20 LAA / 1:100 Treatment)", se.flooding_potential, "×" if (se.below_1_in_20_flood or se.below_1_in_100_flood or spatial.flood_planning) else "✓"],
@@ -652,6 +499,14 @@ def build_ossm_docx_report(
             rb.bold = True
             rb.font.size = Pt(8.8)
             p_note.add_run(f"{bh.bolus_description or ''} (Ribbon: {bh.bolus_ribbon_mm or 'N/A'})").font.size = Pt(8.8)
+
+    if _add_figure(
+        doc,
+        diagrams.get("borehole_profile"),
+        f"Figure {fig_num}: Stratigraphic Soil Borehole Horizon Profiles (BH1–BH{max(1, len(inp.boreholes))}) showing Disposal Level, Field pH, and Modified Emerson Dispersion Class.",
+        width_in=6.4,
+    ):
+        fig_num += 1
 
     if audit.requires_gypsum:
         _add_callout(
@@ -767,6 +622,14 @@ def build_ossm_docx_report(
         ])
     _add_grid_table(doc, ["OSmodel300614 Parameter", "Calculated Value"], model_rows)
 
+    if _add_figure(
+        doc,
+        diagrams.get("sizing_chart"),
+        f"Figure {fig_num}: OSmodel300614 Land Application Area Sizing Drivers ({model.limiting_factor} Limiting) & Alstonville 1970–1991 Monthly Rainfall vs. Evapotranspiration Profile.",
+        width_in=6.5,
+    ):
+        fig_num += 1
+
     _add_heading(doc, "6.1 Daily Loading Rate (DLR / LTR) Verification (AS/NZS 1547:2012 Table H3)", level=2)
     rate_label = "Design Irrigation Rate (DIR)" if is_irrig else "Design Loading Rate (DLR)"
     doc.add_paragraph(
@@ -809,6 +672,20 @@ def build_ossm_docx_report(
             ],
         )
 
+    _add_heading(doc, "6.3 OSmodel300614 Council Officer Verification Summary", level=2)
+    _add_grid_table(
+        doc,
+        ["Excel Model Sheet / Block", "Key Input / Formula Check", "Verified Output"],
+        [
+            ["Inputs (Cells C6–C26)", f"{model.design_persons} EP · {inp.water_supply.value.replace('_', ' ')} · Block {inp.block_size_m2:,.0f} m² · Buffer {inp.buffer_feature.value} @ {inp.buffer_distance_m:.0f} m", f"Q = {model.total_flow_ld:.0f} L/d ({model.annual_flow_m3:.1f} m³/yr)"],
+            ["Soil & Bucket (Rows 24–40)", f"Soil ID {inp.soil_texture_id} ({model.soil_texture_name}) · Root {inp.root_zone_depth_mm:.0f} mm + Gravel {inp.gravel_depth_mm:.0f} mm", f"DLR/DIR {model.max_deep_drainage_mmd:.1f} mm/d · Sat {model.bucket_cap_sat_mm:.1f} mm / AWC {model.bucket_cap_awc_mm:.1f} mm"],
+            ["Kinetics (AM16–BA26)", f"System: {inp.treatment_system.value.replace('_', ' ')} · Influent BOD5 {model.weighted_influent_bod_mgl:.0f} mg/L", f"RB {model.reed_bed_required_m2:.1f} m² · HRT {model.reed_bed_hrt_days:.1f} d · N Rem {model.n_removal_pct:.1f}%"],
+            ["Daily Water Balance (C31)", "7,670-day Alstonville series (1970–1991); target 95th-percentile exceedance = 0.0 mm", f"Hydraulic Area = {model.hydraulic_area_m2:.1f} m² (Exceed: {model.exceedance_days_count} d / {model.exceedance_pct_of_days:.2f}%)"],
+            ["Nutrient Balances (C32–C33)", f"Morand '{model.morand_code}' (P-sorp {model.p_sorption_kg_ha_m:,.0f} kg/ha/m; WT {se.depth_to_water_table_m:.1f} m)", f"Nitrogen = {model.nitrogen_area_m2:.1f} m² · Phosphorus = {model.phosphorus_area_m2:.1f} m²"],
+            ["Governing LAA (C34 & Designer)", f"Max(Hydraulic, Nitrogen, Phosphorus, Area Cap {model.area_cap_m2:.1f} m²)", f"{model.required_laa_m2:.1f} m² ({model.limiting_factor}) + {model.reserve_laa_m2:.1f} m² Reserve"],
+        ],
+    )
+
     # =========================================================================
     # SECTION 7: CLAUSE-CITED REGULATORY COMPLIANCE MATRIX
     # =========================================================================
@@ -825,29 +702,28 @@ def build_ossm_docx_report(
     # SECTION 8: SITE INSPECTION PHOTOGRAPHS
     # =========================================================================
     _add_heading(doc, "8. Site Inspection Photographs", level=1)
-    valid_photos = [(p, cap) for (p, cap) in photo_items if p and p.exists()]
     if valid_photos:
         doc.add_paragraph(
             f"The following geotagged field inspection photographs were captured on {se.assessment_date.strftime('%d %B %Y')} "
             f"to document ground cover, slope gradient, pegged component locations, soil borehole profiles, and downslope buffers."
         )
-        for idx, (ppath, caption) in enumerate(valid_photos, start=1):
-            _add_figure(doc, ppath, f"Photo {idx}: {caption}", width_in=5.6)
+        add_photo_grid(doc, valid_photos)
     else:
         doc.add_paragraph(
-            "Site inspection photographs should be attached prior to final Section 68 lodgement (upload or capture "
-            "photos in Tab 2 of the Field To Forest OSSM Workbench to embed them automatically into this section)."
+            "Field photographic verification records for the nominated treatment unit, primary LAA, reserve LAA, and "
+            "soil boreholes are to be appended prior to final Section 68 lodgement as summarised below."
         )
         _add_grid_table(
             doc,
-            ["Required Photo", "Subject / Field Verification Target", "Captured?"],
+            ["Required Photo", "Subject / Field Verification Target", "Status"],
             [
-                ["Photo 1", "Dwelling sanitary plumbing outlet & proposed Septic Tank location (pegged >= 3.0 m from dwelling)", "[  ] Pending"],
-                ["Photo 2", "Proposed Reed Bed / Secondary Treatment unit location & upslope drainage context" if has_rb or is_awts else "Downslope aspect from septic tank towards proposed LAA", "[  ] Pending"],
-                ["Photo 3", "Pegged Primary Land Application Area (LAA) showing slope, aspect & grass cover", "[  ] Pending"],
-                ["Photo 4", "Pegged 100% Alternate (Reserve) LAA & downslope setback buffer to gully/boundary", "[  ] Pending"],
-                ["Photo 5", "Soil Borehole BH1 & BH2 auger profile horizons & bolus ribbon test", "[  ] Pending"],
+                ["Photo 1", "Dwelling sanitary plumbing outlet & proposed Septic Tank location (pegged >= 3.0 m from dwelling)", "PENDING"],
+                ["Photo 2", "Proposed Reed Bed / Secondary Treatment unit location & upslope drainage context" if has_rb or is_awts else "Downslope aspect from septic tank towards proposed LAA", "PENDING"],
+                ["Photo 3", "Pegged Primary Land Application Area (LAA) showing slope, aspect & grass cover", "PENDING"],
+                ["Photo 4", "Pegged 100% Alternate (Reserve) LAA & downslope setback buffer to gully/boundary", "PENDING"],
+                ["Photo 5", "Soil Borehole BH1 & BH2 auger profile horizons & bolus ribbon test", "PENDING"],
             ],
+            status_col=2,
         )
 
     doc.add_page_break()
@@ -1109,6 +985,70 @@ def build_ossm_docx_report(
     )
     rc.bold = True
     rc.font.color.rgb = NAVY
+
+    # =========================================================================
+    # CONDITIONALLY TRIGGERED STATUTORY APPENDICES
+    # =========================================================================
+    if audit.requires_rous_water_assessment or audit.requires_certified_irrigation_design or audit.requires_commercial_assessment:
+        doc.add_page_break()
+        _add_heading(doc, "Triggered Statutory Compliance Appendices", level=1)
+
+        if audit.requires_rous_water_assessment:
+            _add_heading(doc, "Appendix A — Rous Water Guidelines (2008) Drinking Water Catchment Assessment", level=2)
+            doc.add_paragraph(
+                "The subject allotment intersects a mapped Drinking Water Catchment (Lismore LEP 2012 Cl. 6.4). "
+                "The following multi-barrier risk controls address the Rous Water On-Site Wastewater Management "
+                "Guidelines (2008) to achieve a Neutral or Beneficial Effect (NorBE) on raw drinking water quality:"
+            )
+            _add_grid_table(
+                doc,
+                ["Rous Water Control Criterion", "Site Design Provision", "Status"],
+                [
+                    ["Secondary Effluent Quality Barrier", f"{inp.treatment_system.value.replace('_', ' ').title()} (BOD outlet {model.reed_bed_bod_outlet_mgl:.1f} mg/L; N removal {model.n_removal_pct:.1f}%)", "PASS" if not is_primary else "FAIL"],
+                    ["Watercourse & Gully Setback", f"Perennial watercourse: {se.dist_perennial_watercourse_m or 'Verify'} m (req >= 100 m); Gully: {se.dist_gully_m or 'Verify'} m (req >= 40 m)", "PASS" if not any(c.code in ("BUF-WATER", "BUF-GULLY") and c.status != "PASS" for c in audit.checks) else "LIMITATION"],
+                    ["Nutrient Attenuation (N & P)", f"50-yr P-sorption {model.p_sorption_kg_ha_m:,.0f} kg/ha/m; N area {model.nitrogen_area_m2:.1f} m²; P area {model.phosphorus_area_m2:.1f} m²", "PASS"],
+                    ["Zero Surface Ponding / 95th-% Exceedance", f"Alstonville 7,670-day model p95 exceedance = {model.p95_exceedance_mm:.4f} mm across {model.required_laa_m2:.1f} m² LAA", "PASS"],
+                    ["Stormwater Exclusion & Buffer Planting", f"Upslope diversion swale + downslope Lomandra hystrix uptake planting + 100% Reserve LAA ({model.reserve_laa_m2:.1f} m²)", "PASS"],
+                ],
+                status_col=2,
+            )
+
+        if audit.requires_certified_irrigation_design:
+            _add_heading(doc, "Appendix B — LCC Appendix C & D Certified Irrigation Design Plan (CIDP) Checklist", level=2)
+            doc.add_paragraph(
+                "Because Sub-Surface Drip or Surface Spray Irrigation is nominated, Lismore City Council OSSM Strategy (2013) "
+                "Part B s1.1 and Appendices C & D require the following items to be certified by a Certified Irrigation Designer (CID):"
+            )
+            _add_grid_table(
+                doc,
+                ["CIDP Mandatory Deliverable", "Technical Requirement (LCC Appendices C & D)", "Status"],
+                [
+                    ["A3 Scaled Irrigation Plans", f"A3 plans at 1:200 / 1:250 depicting {tr.trench_length_m:.1f} m × {tr.trench_width_m:.1f} m zone ({model.required_laa_m2:.1f} m²) + 100% Reserve", "PENDING"],
+                    ["Hydraulic Uniformity & Pressure Loss", "Distribution uniformity >= 90%; pressure-compensating root-guard emitters; max 10% pressure variation across zone", "PENDING"],
+                    ["Scour / Flushing Velocity", "Minimum 0.8 m/s scour velocity verified at manifold flush valves returning safely to primary/headworks", "PENDING"],
+                    ["Pump Well, Filtration & Controls", "1,800 L pump well, high-level audio/visual alarm, 120-mesh (130 µm) disc filter, liquid-filled pressure gauges, air-release valve", "PENDING"],
+                    ["Signed Appendix C & D Checklists", "Completed and signed Irrigation Designer certification lodged with Section 68 application", "PENDING"],
+                ],
+                status_col=2,
+            )
+
+        if audit.requires_commercial_assessment:
+            _add_heading(doc, "Appendix C — Commercial / Multi-Use (> 2,000 L/d or Food Processing) Pre-Lodgement Checklist", level=2)
+            doc.add_paragraph(
+                f"Combined design loading ({model.total_flow_ld:.0f} L/day; {model.design_persons} EP; weighted BOD5 "
+                f"{model.weighted_influent_bod_mgl:.0f} mg/L) triggers commercial / multi-use engineering review:"
+            )
+            _add_grid_table(
+                doc,
+                ["Commercial Control Item", "Design Specification & Statutory Basis", "Status"],
+                [
+                    ["Grease Arrestor (FOG Pre-Treatment)", f"{model.grease_arrestor_min_l} L AS/NZS 3500.2 commercial grease arrestor upstream of septic tank" if model.grease_arrestor_min_l > 0 else "Confirm whether commercial kitchen/food prep is present", "PASS" if model.grease_arrestor_min_l > 0 else "INFO"],
+                    ["Flow Equalisation / Surge Tank", f"{model.surge_tank_min_l} L timer-dosed surge balance tank smoothing weekend / batch surges" if model.surge_tank_min_l > 0 else "Confirm peak-day surge attenuation requirements", "PASS" if model.surge_tank_min_l > 0 else "INFO"],
+                    ["NSW Health Commercial Accreditation", "Verify manufacturer accreditation for commercial daily hydraulic & BOD5 loading (> 2,000 L/d / > 10 EP)", "PENDING"],
+                    ["Liquid Trade Waste / Pump-Out Contract", "Establish 3–6 monthly licensed liquid waste contractor docket register for Council audit", "PENDING"],
+                ],
+                status_col=2,
+            )
 
     doc.save(str(out_docx))
     return out_docx

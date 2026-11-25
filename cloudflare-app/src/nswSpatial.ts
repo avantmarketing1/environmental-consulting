@@ -61,7 +61,6 @@ const BUSHFIRE_LAYER =
   "https://mapprod3.environment.nsw.gov.au/arcgis/rest/services/Fire/BFPL/MapServer/0";
 
 const DEG2RAD = Math.PI / 180;
-const EARTH_R = 6378137.0;
 
 /** Approximate WGS84/GDA2020 (lon, lat) -> MGA Zone 56 (EPSG:7856) Easting/Northing (sub-metre accurate for Lismore). */
 export function wgs84ToMga56(lon: number, lat: number): [number, number] {
@@ -166,25 +165,75 @@ function polygonAreaAndCentroid(geom: { type: string; coordinates: unknown }): {
   };
 }
 
-function haversineM(lon1: number, lat1: number, lon2: number, lat2: number): number {
-  const dLat = (lat2 - lat1) * DEG2RAD;
-  const dLon = (lon2 - lon1) * DEG2RAD;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(a)));
+function pointInRing(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
 }
 
-function extractLineVertices(geom: { type: string; coordinates: unknown }): number[][] {
-  if (geom.type === "LineString") return geom.coordinates as number[][];
-  if (geom.type === "MultiLineString") return (geom.coordinates as number[][][]).flat();
+function pointToSegmentDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 1e-12) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function minDistancePolygonToLineMga(parcelRings: [number, number][][], linePts: [number, number][]): number {
+  let minD = Infinity;
+  for (const [wx, wy] of linePts) {
+    for (const ring of parcelRings) {
+      if (pointInRing(wx, wy, ring)) return 0;
+      for (let i = 0; i < ring.length - 1; i++) {
+        const d = pointToSegmentDist(wx, wy, ring[i][0], ring[i][1], ring[i + 1][0], ring[i + 1][1]);
+        if (d < minD) minD = d;
+      }
+    }
+  }
+  // Also check parcel vertices against watercourse segments (handles long straight stream segments crossing corners)
+  for (const ring of parcelRings) {
+    for (const [px, py] of ring) {
+      for (let i = 0; i < linePts.length - 1; i++) {
+        const d = pointToSegmentDist(px, py, linePts[i][0], linePts[i][1], linePts[i + 1][0], linePts[i + 1][1]);
+        if (d < minD) minD = d;
+      }
+    }
+  }
+  return minD;
+}
+
+function extractLineStrings(geom: { type: string; coordinates: unknown }): number[][][] {
+  if (geom.type === "LineString") return [geom.coordinates as number[][]];
+  if (geom.type === "MultiLineString") return geom.coordinates as number[][][];
   return [];
 }
 
-function extractOuterVertices(geom: { type: string; coordinates: unknown }): number[][] {
-  if (geom.type === "Polygon") return (geom.coordinates as number[][][])[0] ?? [];
-  if (geom.type === "MultiPolygon") return (geom.coordinates as number[][][][]).map((p) => p[0] ?? []).flat();
+function extractOuterRings(geom: { type: string; coordinates: unknown }): number[][][] {
+  if (geom.type === "Polygon") {
+    const outer = (geom.coordinates as number[][][])[0];
+    return outer ? [outer] : [];
+  }
+  if (geom.type === "MultiPolygon") {
+    return (geom.coordinates as number[][][][]).map((p) => p[0]).filter(Boolean);
+  }
   return [];
+}
+
+function buildEsriParcelPolygon(geom: { type: string; coordinates: unknown }, maxPtsPerRing = 48): string | null {
+  const rings = extractOuterRings(geom)
+    .slice(0, 6)
+    .map((r) => simplifyLine(r, maxPtsPerRing));
+  if (!rings.length) return null;
+  return JSON.stringify({
+    rings,
+    spatialReference: { wkid: 4326 },
+  });
 }
 
 async function fetchJson(url: string, params: Record<string, string>): Promise<Record<string, unknown>> {
@@ -243,13 +292,48 @@ async function queryGeoJson(url: string, params: Record<string, string>): Promis
   return (data.features as GeoJsonFeature[] | undefined) ?? [];
 }
 
-async function queryOverlayAttrs(layerUrl: string, lon: number, lat: number): Promise<Record<string, unknown>[]> {
-  const pad = 0.0005;
+async function queryOverlayAttrsForParcel(
+  layerUrl: string,
+  esriPolygonJson: string | null,
+  bbox: [number, number, number, number],
+): Promise<Record<string, unknown>[]> {
+  // Prefer exact whole-parcel polygon intersection via POST (catches edge/corner overlays on large rural lots)
+  if (esriPolygonJson) {
+    try {
+      const form = new URLSearchParams({
+        geometry: esriPolygonJson,
+        geometryType: "esriGeometryPolygon",
+        inSR: "4326",
+        spatialRel: "esriSpatialRelIntersects",
+        outFields: "*",
+        returnGeometry: "false",
+        f: "json",
+      });
+      const resp = await fetch(`${layerUrl}/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: form.toString(),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as Record<string, unknown>;
+        if (!data.error) {
+          const feats = (data.features as Array<{ attributes?: Record<string, unknown> }> | undefined) ?? [];
+          return feats.map((f) => f.attributes ?? {});
+        }
+      }
+    } catch (_) {
+      // Fall back to full parcel bounding envelope below
+    }
+  }
+
   const geom = JSON.stringify({
-    xmin: lon - pad,
-    ymin: lat - pad,
-    xmax: lon + pad,
-    ymax: lat + pad,
+    xmin: bbox[0],
+    ymin: bbox[1],
+    xmax: bbox[2],
+    ymax: bbox[3],
     spatialReference: { wkid: 4326 },
   });
   const data = await fetchJson(`${layerUrl}/query`, {
@@ -369,7 +453,10 @@ export async function runNswSpatialPrecheck(
     spatialRel: "esriSpatialRelIntersects",
   };
 
-  // Run all remaining 13 NSW Spatial & Planning Portal queries concurrently (14 total subrequests << 50 Free cap)
+  // Build compact whole-parcel Esri polygon for exact statutory overlay intersection across the entire lot
+  const parcelEsriPoly = buildEsriParcelPolygon(parcel.geometry, 48);
+
+  // Run all remaining 14 NSW Spatial & Planning Portal queries concurrently (15 total subrequests << 50 Free cap)
   const [
     neighboursRes,
     waterRes,
@@ -389,17 +476,17 @@ export async function runNswSpatialPrecheck(
     queryGeoJson(CADASTRE_LOT_URL, { ...spatialParams, outFields: "lotnumber,planlabel,lotidstring" }),
     queryGeoJson(HYDRO_LINE_URL, { ...spatialParams, outFields: "hydroname,perenniality,classsubtype" }),
     queryGeoJson(CONTOUR_URL, { ...spatialParams, outFields: "elevation" }),
-    queryOverlayAttrs(`${EPI_BASE}/2`, lon, lat),
-    queryOverlayAttrs(`${EPI_BASE}/4`, lon, lat),
-    queryOverlayAttrs(`${HAZARD_BASE}/1`, lon, lat),
-    queryOverlayAttrs(`${HAZARD_BASE}/2`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/1`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/3`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/4`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/7`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/10`, lon, lat),
-    queryOverlayAttrs(`${PROTECTION_BASE}/11`, lon, lat),
-    queryOverlayAttrs(BUSHFIRE_LAYER, lon, lat),
+    queryOverlayAttrsForParcel(`${EPI_BASE}/2`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${EPI_BASE}/4`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${HAZARD_BASE}/1`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${HAZARD_BASE}/2`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/1`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/3`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/4`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/7`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/10`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(`${PROTECTION_BASE}/11`, parcelEsriPoly, bbox),
+    queryOverlayAttrsForParcel(BUSHFIRE_LAYER, parcelEsriPoly, bbox),
   ]);
 
   if (neighboursRes.status === "fulfilled") {
@@ -411,22 +498,17 @@ export async function runNswSpatialPrecheck(
   }
   if (waterRes.status === "fulfilled") {
     result.watercourses_geojson = compactFeatures(waterRes.value, 40, 35);
-    // Estimate nearest distance between parcel boundary vertices and watercourse vertices
-    const pVerts = extractOuterVertices(parcel.geometry);
+    // Exact MGA56 point-in-polygon + segment distance between parcel boundary and mapped watercourses
+    const parcelMgaRings = extractOuterRings(parcel.geometry).map((ring) =>
+      simplifyLine(ring, 80).map(([x, y]) => wgs84ToMga56(x, y)),
+    );
     let minD = Infinity;
     for (const wf of result.watercourses_geojson) {
-      const wVerts = extractLineVertices(wf.geometry);
-      for (let i = 0; i < wVerts.length; i += Math.max(1, Math.floor(wVerts.length / 15))) {
-        const [wx, wy] = wVerts[i];
-        // Quick bbox check: if vertex inside parcel bbox, distance ~ 0
-        if (wx >= bbox[0] && wx <= bbox[2] && wy >= bbox[1] && wy <= bbox[3]) {
-          minD = 0;
-          break;
-        }
-        for (let j = 0; j < pVerts.length; j += Math.max(1, Math.floor(pVerts.length / 20))) {
-          const d = haversineM(wx, wy, pVerts[j][0], pVerts[j][1]);
-          if (d < minD) minD = d;
-        }
+      for (const line of extractLineStrings(wf.geometry)) {
+        const lineMga = line.map(([x, y]) => wgs84ToMga56(x, y));
+        const d = minDistancePolygonToLineMga(parcelMgaRings, lineMga);
+        if (d < minD) minD = d;
+        if (minD === 0) break;
       }
       if (minD === 0) break;
     }
@@ -499,7 +581,7 @@ export async function runNswSpatialPrecheck(
     flags.push(`BUSHFIRE PRONE LAND (${result.bushfire_prone_land.join(", ")}): Shield exposed poly pipework/tanks.`);
   }
   if (!flags.length) {
-    flags.push("No major statutory hazard overlays intersected at parcel centroid; verify local gullies & domestic bores on site.");
+    flags.push("No major statutory hazard overlays intersected across parcel boundary; verify local gullies & domestic bores on site.");
   }
   result.pre_site_flags = flags;
   return result;

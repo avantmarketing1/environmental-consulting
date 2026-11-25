@@ -30,23 +30,12 @@
 			"database_name": "fieldtoforest-consulting-db",
 			"database_id": "9dc54e9c-b354-4916-baa3-9a4ebc8d6f8f",
 			"migrations_dir": "migrations"
-		},
-		{
-			"binding": "fieldtoforest_consulting_db",
-			"database_name": "fieldtoforest-consulting-db",
-			"database_id": "9dc54e9c-b354-4916-baa3-9a4ebc8d6f8f",
-			"remote": true
 		}
 	],
 	"r2_buckets": [
 		{
 			"binding": "FILES",
 			"bucket_name": "fieldtoforest-consulting-files"
-		},
-		{
-			"bucket_name": "fieldtoforest-consulting-files",
-			"binding": "fieldtoforest_consulting_files",
-			"remote": true
 		}
 	],
 	"vars": {

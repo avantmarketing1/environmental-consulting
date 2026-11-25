@@ -349,6 +349,149 @@ def render_grease_arrestor_xsec_png(model: WastewaterModelResult, out_png: Path)
     return out_png
 
 
+def render_sizing_balance_png(inp: SiteAssessmentInput, model: WastewaterModelResult, out_png: Path) -> Path:
+    """Render OSmodel300614 LAA Sizing Drivers Bar Chart + Alstonville Monthly Climate Profile."""
+    # Alstonville 1970-1991 climatology monthly averages (mm/month)
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    rain_mm = [194, 232, 239, 178, 152, 134, 88, 72, 64, 108, 136, 165]
+    et_mm = [146, 121, 114, 89, 68, 56, 61, 79, 101, 123, 134, 151]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.4, 3.8), dpi=200, gridspec_kw={"width_ratios": [1.05, 1.15]})
+
+    # Left: 4 LAA sizing drivers
+    labels = ["Hydraulic\n(7,670-d)", "Nitrogen\nBalance", "Phosphorus\n(50-yr)", "Min Area\nCap"]
+    vals = [model.hydraulic_area_m2, model.nitrogen_area_m2, model.phosphorus_area_m2, model.area_cap_m2]
+    factor_keys = ["Hydraulic", "Nitrogen", "Phosphorus", "Minimum Area Cap"]
+    colors = ["#143628" if fk == model.limiting_factor else "#94a3b8" for fk in factor_keys]
+
+    y_pos = range(len(labels))
+    bars = ax1.barh(y_pos, vals, color=colors, edgecolor="#0f172a", linewidth=0.9, height=0.58)
+    ax1.set_yticks(list(y_pos))
+    ax1.set_yticklabels(labels, fontsize=8.2, fontweight="bold", color="#1e293b")
+    ax1.invert_yaxis()
+    max_v = max(max(vals), 10.0)
+    ax1.set_xlim(0, max_v * 1.28)
+    ax1.set_xlabel("Required Area (m²)", fontsize=8.2, fontweight="bold", color="#334155")
+    ax1.set_title(f"LAA Sizing Drivers (Limiting: {model.limiting_factor})", fontsize=9.2, fontweight="bold", color="#0d241b", pad=8)
+    ax1.grid(axis="x", linestyle=":", color="#cbd5e1")
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+    for bar, v, fk in zip(bars, vals, factor_keys):
+        tag = f" {v:.1f} m² ★" if fk == model.limiting_factor else f" {v:.1f} m²"
+        ax1.text(v + max_v * 0.02, bar.get_y() + bar.get_height() / 2, tag, va="center", fontsize=7.8, fontweight="bold" if fk == model.limiting_factor else "normal", color="#0d241b" if fk == model.limiting_factor else "#475569")
+
+    # Right: Alstonville Monthly Rain vs ET
+    x = list(range(len(months)))
+    ax2.bar(x, rain_mm, width=0.58, color="#93c5fd", edgecolor="#1d4ed8", linewidth=0.8, label="Mean Rain (mm)")
+    ax2.plot(x, et_mm, color="#b45309", marker="o", markersize=4, linewidth=2.0, label="Crop ET (mm)")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(months, fontsize=7.5, color="#334155")
+    ax2.set_ylabel("Monthly Depth (mm)", fontsize=8.0, fontweight="bold", color="#334155")
+    ax2.set_title("Alstonville Climate (1970–1991) & Exceedance Check", fontsize=9.2, fontweight="bold", color="#0d241b", pad=8)
+    ax2.grid(axis="y", linestyle=":", color="#cbd5e1")
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+    ax2.legend(fontsize=7.3, loc="upper right", frameon=True)
+    ax2.text(
+        0.02, 0.94,
+        f"p95 Exceed: {model.p95_exceedance_mm:.2f} mm  |  Exceed Days: {model.exceedance_days_count}/7670 ({model.exceedance_pct_of_days:.2f}%)\n"
+        f"Actual DLR: {model.daily_loading_rate_actual_mmd:.1f} mm/d  vs  Max: {model.max_deep_drainage_mmd:.1f} mm/d",
+        transform=ax2.transAxes,
+        fontsize=7.0,
+        va="top",
+        color="#143628",
+        fontweight="bold",
+        bbox=dict(facecolor="#f0fdf4", edgecolor="#166534", linewidth=0.8, pad=3.0),
+    )
+
+    fig.tight_layout(pad=0.8)
+    fig.savefig(out_png, dpi=200, facecolor="white")
+    plt.close(fig)
+    return out_png
+
+
+def render_borehole_profile_png(
+    inp: SiteAssessmentInput,
+    model: WastewaterModelResult,
+    audit: ComplianceAuditResult,
+    out_png: Path,
+) -> Path:
+    """Render visual stratigraphic soil borehole horizon profiles (BH1, BH2, ...)."""
+    bhs = inp.boreholes
+    n_bh = max(1, len(bhs))
+    max_depth = max([bh.max_depth_mm for bh in bhs] + [1000])
+
+    fig, ax = plt.subplots(figsize=(8.6, 3.8), dpi=200)
+    ax.set_xlim(0, max(2.2, n_bh * 2.4 + 0.8))
+    ax.set_ylim(max_depth + 180, -210)
+    ax.axis("off")
+
+    ax.text(
+        max(2.2, n_bh * 2.4 + 0.8) / 2,
+        -155,
+        f"STRATIGRAPHIC SOIL BOREHOLE PROFILES — {model.morand_unit_name.upper()} ({model.morand_code.upper()}) · CAT {model.soil_category}",
+        ha="center",
+        fontsize=9.6,
+        fontweight="bold",
+        color="#0d241b",
+    )
+
+    # Depth ruler on left
+    ax.plot([0.55, 0.55], [0, max_depth], color="#334155", lw=1.4)
+    for d in range(0, max_depth + 1, 200):
+        ax.plot([0.48, 0.55], [d, d], color="#334155", lw=1.1)
+        ax.text(0.44, d, f"{d}", ha="right", va="center", fontsize=7.2, color="#475569")
+    ax.text(0.44, -45, "mm", ha="right", va="center", fontsize=7.2, fontweight="bold", color="#334155")
+
+    def horizon_color(h) -> str:
+        c = (h.colour or "").lower()
+        if "dark" in c or h.horizon.upper().startswith("A"):
+            return "#8b6b4a"
+        if "red" in c:
+            return "#b86b4b"
+        if "grey" in c or "gray" in c:
+            return "#94a3b8"
+        if "yellow" in c or "ochre" in c:
+            return "#d4a359"
+        return "#b08968"
+
+    for idx, bh in enumerate(bhs):
+        bx = 0.95 + idx * 2.35
+        col_w = 0.85
+        ax.text(bx + col_w / 2, -55, f"{bh.borehole_id} ({bh.max_depth_mm} mm)", ha="center", fontsize=8.3, fontweight="bold", color="#0d241b")
+        for h in bh.horizons:
+            h_depth = max(20, h.depth_bottom_mm - h.depth_top_mm)
+            fc = horizon_color(h)
+            ec = "#b45309" if h.is_disposal_level else "#1e293b"
+            lw = 2.2 if h.is_disposal_level else 1.1
+            ax.add_patch(patches.Rectangle((bx, h.depth_top_mm), col_w, h_depth, facecolor=fc, edgecolor=ec, lw=lw, alpha=0.88))
+            mid_y = h.depth_top_mm + h_depth / 2
+            ax.text(bx + col_w / 2, mid_y, f"{h.horizon}{'*' if h.is_disposal_level else ''}", ha="center", va="center", fontsize=8.5, fontweight="bold", color="white")
+            disp_str = f"E{h.dispersive_class}" if h.dispersive_class is not None else "—"
+            ph_str = f"pH {h.ph:.1f}" if h.ph is not None else ""
+            ax.text(
+                bx + col_w + 0.08,
+                mid_y,
+                f"{h.classification}\n{ph_str} · {disp_str}",
+                ha="left",
+                va="center",
+                fontsize=7.0,
+                color="#991b1b" if (h.dispersive_class or 1) >= 3 else "#334155",
+                fontweight="bold" if h.is_disposal_level else "normal",
+            )
+
+    footer_msg = (
+        f"* Disposal horizon  |  Water Table / Bedrock: >= {inp.site_eval.depth_to_water_table_m:.1f} m  |  "
+        + (f"GYPSUM REQUIRED @ {audit.gypsum_rate_kg_m2:.1f} kg/m² (Emerson Class 3/4)" if audit.requires_gypsum else "Non-Dispersive Subsoil (Emerson Class 1–2)")
+    )
+    ax.text(max(2.2, n_bh * 2.4 + 0.8) / 2, max_depth + 115, footer_msg, ha="center", fontsize=7.6, fontweight="bold", color="#92400e" if audit.requires_gypsum else "#166534")
+
+    fig.tight_layout(pad=0.2)
+    fig.savefig(out_png, dpi=200, facecolor="white")
+    plt.close(fig)
+    return out_png
+
+
 def generate_all_report_diagrams(
     inp: SiteAssessmentInput,
     model: WastewaterModelResult,
@@ -360,6 +503,9 @@ def generate_all_report_diagrams(
     output_dir.mkdir(parents=True, exist_ok=True)
     out: dict[str, Path] = {}
     out["treatment_train"] = render_treatment_train_png(inp, model, output_dir / f"{slug}_Treatment_Train.png")
+    out["sizing_chart"] = render_sizing_balance_png(inp, model, output_dir / f"{slug}_Sizing_Chart.png")
+    if inp.boreholes:
+        out["borehole_profile"] = render_borehole_profile_png(inp, model, audit, output_dir / f"{slug}_Borehole_Profile.png")
     if model.grease_arrestor_min_l > 0:
         out["grease_xsec"] = render_grease_arrestor_xsec_png(model, output_dir / f"{slug}_Grease_Arrestor_XSec.png")
     if inp.treatment_system != TreatmentSystemType.SECONDARY_AWTS:

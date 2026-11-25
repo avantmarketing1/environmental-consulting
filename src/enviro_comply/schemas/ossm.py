@@ -192,6 +192,8 @@ class FieldPin(BaseModel):
     rotation_deg: float = 0.0
     easting_mga56: Optional[float] = None
     northing_mga56: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class SitePhoto(BaseModel):

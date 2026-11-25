@@ -18,11 +18,13 @@ const { loadLismoreDatasets, runLismoreModelJS, auditLismoreComplianceJS, render
   "../public/consulting/app/lismore-engine.js"
 );
 const {
+  renderBoreholeProfileSvg,
   renderTreatmentTrainSvg,
   renderSepticCrossSectionSvg,
   renderReedBedCrossSectionSvg,
   renderEtaCrossSectionSvg,
   renderSdiCrossSectionSvg,
+  renderSizingAndWaterBalanceSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
 } = await import("../public/consulting/app/diagrams.js");
@@ -159,30 +161,48 @@ const etaXsecSvg = renderEtaCrossSectionSvg(sc, scRes, scAudit);
 assert.ok(etaXsecSvg.includes("GYPSUM") || etaXsecSvg.includes("Gypsum"), "ETA XSec SVG should show gypsum amelioration for Class 3/4");
 const sdiXsecSvg = renderSdiCrossSectionSvg(sdi4, sdiRes);
 assert.ok(sdiXsecSvg.includes("558.7 m²") || sdiXsecSvg.includes("1,800 L"), "SDI XSec SVG missing key design details");
-const gisSvg = renderGisSiteMapSvg(sc, {
-  fetched_live: true,
-  lot_id_string: "1//DP100000",
-  parcel_area_ha: 8.46,
-  centroid_easting_mga56: 520123,
-  centroid_northing_mga56: 6838456,
-  parcel_geojson: {
-    type: "Feature",
-    geometry: {
-      type: "Polygon",
-      coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]],
-    },
+const gisSvg = renderGisSiteMapSvg(
+  {
+    ...sc,
+    field_pins: [
+      { label: "DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
+      { label: "ETA BED", feature_type: "eta_bed", latitude: -28.5818, longitude: 153.2015 },
+    ],
   },
-  watercourses_geojson: [
-    {
+  {
+    fetched_live: true,
+    lot_id_string: "1//DP100000",
+    parcel_area_ha: 8.46,
+    centroid_easting_mga56: 520123,
+    centroid_northing_mga56: 6838456,
+    drinking_water_catchment: true,
+    parcel_geojson: {
       type: "Feature",
       geometry: {
-        type: "LineString",
-        coordinates: [[153.199, -28.581], [153.204, -28.582]],
+        type: "Polygon",
+        coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]],
       },
     },
-  ],
-});
+    watercourses_geojson: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: [[153.199, -28.581], [153.204, -28.582]],
+        },
+      },
+    ],
+  },
+);
 assert.ok(gisSvg.includes("OSSM-GIS-01") && gisSvg.includes("DP100000"), "GIS Site Map SVG missing title block / Lot DP");
+assert.ok(gisSvg.includes("GPS Field Pins (2)") && gisSvg.includes("ROUS WATER"), "GIS Site Map SVG should plot dropped pins and active overlays");
+const seeGisSvg = renderGisSiteMapSvg(sc, { fetched_live: true, parcel_geojson: { type: "Feature", geometry: { type: "Polygon", coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]] } } }, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" });
+assert.ok(seeGisSvg.includes("SEE-GIS-01") && seeGisSvg.includes("DA SUBMISSION"), "SEE GIS SVG should use SEE-GIS-01 title block");
+
+const sizingSvg = renderSizingAndWaterBalanceSvg(sc, scRes);
+assert.ok(sizingSvg.includes("OSMODEL300614 LAA SIZING DRIVERS") && sizingSvg.includes("7,670-DAY BALANCE VERIFIED"), "Sizing chart SVG missing expected metrics");
+const bhSvg = renderBoreholeProfileSvg(sc, scRes, scAudit);
+assert.ok(bhSvg.includes("STRATIGRAPHIC SOIL BOREHOLE PROFILES") && bhSvg.includes("GYPSUM"), "Borehole profile SVG missing expected labels");
 
 // 5b) Test Multi-Use Agritourism + Food Processing (Grease Arrestor + Surge Tank + High-BOD Reed Bed)
 const farmMix = {
@@ -231,7 +251,10 @@ const allSvgs = {
   reedBedSeriesXsec: mixRbSvg,
   etaXsec: etaXsecSvg,
   sdiXsec: sdiXsecSvg,
+  sizingChart: sizingSvg,
+  boreholeProfile: bhSvg,
   gisMap: gisSvg,
+  seeGisMap: seeGisSvg,
 };
 for (const [name, content] of Object.entries(allSvgs)) {
   const noComments = content.replace(/<!--[\s\S]*?-->/g, "");

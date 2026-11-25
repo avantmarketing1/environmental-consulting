@@ -69,4 +69,60 @@ for (let i = 0; i < 3; i++) {
 }
 assert.equal(auth.checkRateLimit("test-ip", 3, 60000).allowed, false);
 
-console.log("[PASS] Public isolation, run_worker_first, HMAC-SHA256 session cookies, route auth matrix & rate limiter verified!");
+// XSS-hardened R2 file response headers (HTML/SVG must NEVER render inline!)
+const htmlHeaders = auth.buildSafeFileResponseHeaders("text/html; charset=utf-8", "jobs/1/client_doc/evil.html");
+assert.equal(htmlHeaders["Content-Type"], "application/octet-stream");
+assert.ok(htmlHeaders["Content-Disposition"].startsWith("attachment;"));
+assert.equal(htmlHeaders["Content-Security-Policy"], "sandbox; default-src 'none'");
+
+const svgHeaders = auth.buildSafeFileResponseHeaders("image/svg+xml", "jobs/1/photo/diagram.svg");
+assert.equal(svgHeaders["Content-Type"], "application/octet-stream");
+assert.ok(svgHeaders["Content-Disposition"].startsWith("attachment;"));
+
+const jpgHeaders = auth.buildSafeFileResponseHeaders("image/jpeg", "jobs/1/photo/site.jpg");
+assert.equal(jpgHeaders["Content-Type"], "image/jpeg");
+assert.ok(jpgHeaders["Content-Disposition"].startsWith("inline;"));
+assert.equal(jpgHeaders["X-Content-Type-Options"], "nosniff");
+
+// Cryptographic Cloudflare Access RS256 JWT verification
+const b64u = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const kp = await crypto.subtle.generateKey(
+  { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+  true,
+  ["sign", "verify"],
+);
+const pubJwk = { ...(await crypto.subtle.exportKey("jwk", kp.publicKey)), kid: "test-kid-1" };
+const nowSec = Math.floor(Date.now() / 1000);
+async function makeJwt(payloadObj) {
+  const h = b64u(JSON.stringify({ alg: "RS256", typ: "JWT", kid: "test-kid-1" }));
+  const p = b64u(JSON.stringify(payloadObj));
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", kp.privateKey, new TextEncoder().encode(`${h}.${p}`));
+  return `${h}.${p}.${b64u(new Uint8Array(sig))}`;
+}
+
+const validJwt = await makeJwt({
+  iss: "https://example.cloudflareaccess.com",
+  aud: ["test-aud-tag"],
+  exp: nowSec + 300,
+  email: "consultant@fieldtoforestfarm.com",
+});
+const okAccess = await auth.verifyCloudflareAccessJwt(validJwt, "example.cloudflareaccess.com", "test-aud-tag", [pubJwk]);
+assert.equal(okAccess.valid, true);
+assert.equal(okAccess.email, "consultant@fieldtoforestfarm.com");
+
+const wrongAud = await auth.verifyCloudflareAccessJwt(validJwt, "example.cloudflareaccess.com", "wrong-aud", [pubJwk]);
+assert.equal(wrongAud.valid, false);
+
+const expiredJwt = await makeJwt({
+  iss: "https://example.cloudflareaccess.com",
+  aud: ["test-aud-tag"],
+  exp: nowSec - 10,
+  email: "consultant@fieldtoforestfarm.com",
+});
+const expiredAccess = await auth.verifyCloudflareAccessJwt(expiredJwt, "example.cloudflareaccess.com", "test-aud-tag", [pubJwk]);
+assert.equal(expiredAccess.valid, false);
+
+const tamperedAccess = await auth.verifyCloudflareAccessJwt(validJwt.slice(0, -4) + "AAAA", "example.cloudflareaccess.com", "test-aud-tag", [pubJwk]);
+assert.equal(tamperedAccess.valid, false);
+
+console.log("[PASS] Public isolation, run_worker_first, HMAC-SHA256 cookies, CF Access RS256 JWT, R2 XSS headers & rate limiter verified!");

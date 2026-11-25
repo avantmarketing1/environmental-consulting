@@ -105,7 +105,7 @@ For maximum security, put **Cloudflare Access** in front of `/consulting/app*` s
 2. **Application name:** `Field To Forest Compliance Studio`
 3. **Application domain:** `fieldtoforestfarm.com`, **Path:** `consulting/app`
 4. **Policy:** Action = **Allow**, Include = **Emails** → enter your personal email address(es).
-5. Save! *(Optional: If you want Zero Trust to sign you in automatically without entering `ADMIN_PASSWORD` a second time, set `TRUST_CF_ACCESS = "true"` in `wrangler.jsonc` `vars`.)*
+5. Save! *(Optional: If you want Zero Trust to sign you in automatically without entering `ADMIN_PASSWORD` a second time, set `TRUST_CF_ACCESS = "true"`, `CF_ACCESS_TEAM_DOMAIN = "<your-team>.cloudflareaccess.com"`, and `CF_ACCESS_AUD = "<your-application-aud-tag>"` in `wrangler.jsonc` `vars` so the Worker cryptographically verifies `Cf-Access-Jwt-Assertion` against your Access JWKS.)*
 
 ### D. Emergency "Under Attack Mode"
 If you ever notice a coordinated DDoS spike, toggle **Quick Actions → Under Attack Mode** in your Cloudflare Overview dashboard — Cloudflare will immediately challenge suspicious traffic at the edge.

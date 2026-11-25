@@ -1,18 +1,36 @@
 import {
   auditLismoreComplianceJS,
+  computePinSetbacksMeters,
   loadLismoreDatasets,
   renderCadLayoutSvg,
   runLismoreModelJS,
+  wgs84ToMga56,
 } from "./lismore-engine.js";
 import {
+  renderBoreholeProfileSvg,
   renderEtaCrossSectionSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
   renderReedBedCrossSectionSvg,
   renderSdiCrossSectionSvg,
   renderSepticCrossSectionSvg,
+  renderSizingAndWaterBalanceSvg,
   renderTreatmentTrainSvg,
 } from "./diagrams.js";
+import {
+  deleteOfflineDraft,
+  deleteOfflinePhoto,
+  getDraftKey,
+  getLastOfflineDraft,
+  getOfflineDraft,
+  listAllUnsyncedPhotos,
+  listOfflineDrafts,
+  listOfflinePhotos,
+  markOfflinePhotoSynced,
+  rekeyOfflinePhotos,
+  saveOfflineDraft,
+  saveOfflinePhoto,
+} from "./offline-store.js";
 
 // ============================================================================
 // STATE & OFFLINE LOCAL MIRROR
@@ -33,10 +51,138 @@ let vaultFiles = []; // Shared File objects uploaded for this job (readable by B
 let r2JobFiles = [];
 let pendingAiExtract = null;
 let uploadedDocsSummary = "";
+let dashboardJobsCache = [];
+let isDirty = false;
+let lastSavedAt = null;
 
 let wbMap = null;
 let wbGisLayer = null;
 let wbPinsLayer = null;
+
+// ============================================================================
+// NON-BLOCKING TOASTS, STYLED CONFIRM MODAL, LIGHTBOX & SAVE STATE UI
+// ============================================================================
+function showToast(message, variant = "info", durationMs = 3600) {
+  const stack = document.getElementById("toastStack");
+  if (!stack) return;
+  const item = document.createElement("div");
+  item.className = `toast-item ${variant}`;
+  item.textContent = message;
+  stack.appendChild(item);
+  setTimeout(() => {
+    item.style.opacity = "0";
+    item.style.transition = "opacity 0.2s ease";
+    setTimeout(() => item.remove(), 220);
+  }, durationMs);
+}
+
+function showConfirmDialog(title, body, okLabel = "Confirm") {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirmModal");
+    if (!modal) return resolve(window.confirm(`${title}\n\n${body}`));
+    document.getElementById("confirmModalTitle").textContent = title;
+    document.getElementById("confirmModalBody").textContent = body;
+    const okBtn = document.getElementById("btnConfirmOk");
+    const cancelBtn = document.getElementById("btnConfirmCancel");
+    okBtn.textContent = okLabel;
+    modal.classList.add("open");
+
+    const cleanup = (result) => {
+      modal.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+  });
+}
+
+function updateSaveStateUi() {
+  const btn = document.getElementById("btnSaveJob");
+  const meta = document.getElementById("saveStateMeta");
+  if (btn && !btn.disabled) {
+    btn.innerHTML = isDirty ? `<span class="save-dot"></span>Save Job to D1` : "Save Job to D1";
+  }
+  if (meta) {
+    if (isDirty) {
+      meta.textContent = "Unsaved edits";
+    } else if (lastSavedAt) {
+      meta.textContent = `Saved ${lastSavedAt}`;
+    } else {
+      meta.textContent = "";
+    }
+  }
+}
+
+function markDirty() {
+  isDirty = true;
+  updateSaveStateUi();
+}
+
+function markSaved() {
+  isDirty = false;
+  lastSavedAt = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  updateSaveStateUi();
+}
+
+// Drawing Zoom Lightbox (click any .drawing-frame to inspect SVG at full resolution)
+function openDrawingLightbox(frameEl) {
+  const svg = frameEl?.querySelector("svg");
+  const modal = document.getElementById("drawingLightbox");
+  const canvas = document.getElementById("lightboxCanvas");
+  const titleEl = document.getElementById("lightboxTitle");
+  if (!svg || !modal || !canvas) return;
+  titleEl.textContent = frameEl.dataset.zoomTitle || "Engineering Drawing Preview";
+  canvas.innerHTML = svg.outerHTML;
+  modal.classList.add("open");
+}
+
+function closeDrawingLightbox() {
+  document.getElementById("drawingLightbox")?.classList.remove("open");
+}
+
+document.getElementById("btnCloseLightbox")?.addEventListener("click", closeDrawingLightbox);
+document.getElementById("drawingLightbox")?.addEventListener("click", (e) => {
+  if (e.target.id === "drawingLightbox") closeDrawingLightbox();
+});
+document.addEventListener("click", (e) => {
+  const frame = e.target.closest(".drawing-frame");
+  if (frame && frame.querySelector("svg")) {
+    openDrawingLightbox(frame);
+  }
+});
+
+// Global Keyboard Shortcuts: Escape closes modals/drawers; Ctrl+S / Cmd+S saves active job to D1
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeDrawingLightbox();
+    closeMobileDrawer();
+    document.getElementById("newJobModal")?.classList.remove("open");
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    saveActiveJobToD1();
+  }
+});
+
+// Mobile Drawer Controls
+function openMobileDrawer() {
+  document.getElementById("wsSidebar")?.classList.add("drawer-open");
+  document.getElementById("wsDrawerBackdrop")?.classList.add("open");
+}
+function closeMobileDrawer() {
+  document.getElementById("wsSidebar")?.classList.remove("drawer-open");
+  document.getElementById("wsDrawerBackdrop")?.classList.remove("open");
+}
+document.getElementById("btnMobileMenu")?.addEventListener("click", openMobileDrawer);
+document.getElementById("btnCloseDrawer")?.addEventListener("click", closeMobileDrawer);
+document.getElementById("wsDrawerBackdrop")?.addEventListener("click", closeMobileDrawer);
 
 // Pyodide Web Worker
 let pyWorker = null;
@@ -45,7 +191,7 @@ const pyPending = new Map();
 
 function getPyWorker() {
   if (!pyWorker) {
-    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=8");
+    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=12");
     pyWorker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === "status") {
@@ -169,6 +315,12 @@ function switchTab(panelId) {
   const target = alias[panelId] || panelId;
   document.querySelectorAll(".ws-nav-item").forEach((b) => b.classList.toggle("active", b.dataset.panel === target));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === target));
+  const activeBtn = document.querySelector(`.ws-nav-item[data-panel="${target}"] .ws-nav-left`);
+  const mobLbl = document.getElementById("mobileActiveStepLabel");
+  if (mobLbl && activeBtn) {
+    mobLbl.textContent = activeBtn.textContent.replace(/^[⌂0-9]+\s*/, "").trim();
+  }
+  closeMobileDrawer();
   if (target === "panel-hub" && wbMap) {
     setTimeout(() => wbMap.invalidateSize(), 70);
   }
@@ -235,17 +387,51 @@ function updateSidebarProgress() {
   if (zRibbon) zRibbon.textContent = zoneShort;
 }
 
-function updateNetBadge() {
+async function updateNetBadge() {
   const b = document.getElementById("netBadge");
+  if (!b) return;
+  const unsyncedPhotos = await listAllUnsyncedPhotos().catch(() => []);
+  const pendingCount = unsyncedPhotos.length;
   if (navigator.onLine) {
-    b.textContent = "Online · D1/R2";
-    b.className = "badge badge-pass";
+    b.textContent = pendingCount > 0 ? `Online · Syncing ${pendingCount}...` : "Online · D1/R2";
+    b.className = pendingCount > 0 ? "badge badge-info" : "badge badge-pass";
   } else {
-    b.textContent = "Offline Cache";
+    b.textContent = pendingCount > 0 ? `Offline (IndexedDB · ${pendingCount} queued)` : "Offline (IndexedDB)";
     b.className = "badge badge-warn";
   }
 }
-window.addEventListener("online", updateNetBadge);
+
+async function flushOfflineSyncQueue() {
+  if (!navigator.onLine) return;
+  try {
+    const unsynced = await listAllUnsyncedPhotos();
+    if (unsynced.length && activeJobId) {
+      const curKey = getDraftKey(activeJobId, assessment);
+      for (const ph of unsynced) {
+        if (ph.draftKey !== curKey) continue;
+        try {
+          const blob = new Blob([ph.bytes], { type: ph.mimeType || "image/jpeg" });
+          const fd = new FormData();
+          fd.append("file", blob, `${ph.id}.${ph.ext || "jpg"}`);
+          fd.append("kind", "photo");
+          fd.append("caption", ph.caption || "Field photo");
+          const resp = await fetch(`/consulting/api/jobs/${activeJobId}/files`, { method: "POST", body: fd });
+          if (resp.ok) {
+            await markOfflinePhotoSynced(ph.id, curKey);
+          }
+        } catch (_) {}
+      }
+      loadJobFiles(activeJobId);
+    }
+  } catch (_) {}
+  await updateNetBadge();
+}
+
+window.addEventListener("online", async () => {
+  await updateNetBadge();
+  await flushOfflineSyncQueue();
+  refreshDashboard();
+});
 window.addEventListener("offline", updateNetBadge);
 
 if ("serviceWorker" in navigator) {
@@ -545,6 +731,15 @@ function syncStateFromForm() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ activeJobId, assessment, spatial: slimSpatial }));
     } catch (_) {}
   }
+  // Persist full multi-job draft asynchronously in IndexedDB
+  saveOfflineDraft({
+    draftKey: getDraftKey(activeJobId, assessment),
+    activeJobId,
+    assessment,
+    spatial,
+    dirty: true,
+  }).catch(() => {});
+  markDirty();
   recalculateAndRender();
 }
 
@@ -611,9 +806,14 @@ function recalculateAndRender() {
     </div>` : ""}
   `;
 
-  // Live CAD SVG + Export Embedded Drawings Preview + SEE Trigger Banner + Sidebar Badges
+  // Live Borehole Profile + Sizing/Water-Balance Chart + CAD SVG + Export Embedded Drawings Preview + Readiness Bars
+  const liveBhBox = document.getElementById("liveBoreholeSvgBox");
+  if (liveBhBox) liveBhBox.innerHTML = renderBoreholeProfileSvg(assessment, lastModel, lastAudit);
+  const liveSizingBox = document.getElementById("liveSizingSvgBox");
+  if (liveSizingBox) liveSizingBox.innerHTML = renderSizingAndWaterBalanceSvg(assessment, lastModel);
   document.getElementById("cadSvgBox").innerHTML = renderCadLayoutSvg(assessment, lastModel);
   renderEmbeddedDrawingsPreview();
+  renderReadinessBars();
   renderSeeTriggerBanner();
   updateSidebarProgress();
 
@@ -649,10 +849,57 @@ function recalculateAndRender() {
   `;
 }
 
+function renderReadinessBars() {
+  if (!assessment || !lastModel || !lastAudit) return;
+  const hasGis = Boolean(spatial?.fetched_live);
+  const photoCnt = localPhotos.length + r2JobFiles.filter((f) => f.kind === "photo").length;
+  const bhs = assessment.boreholes || [];
+  const minBhDepth = bhs.length
+    ? Math.min(...bhs.map((b) => Math.max(0, ...(b.horizons || []).map((h) => Number(h.depth_bottom_mm || 0)))))
+    : 0;
+  const bhOk = bhs.length >= 2 && minBhDepth >= 1000;
+  const failCount = (lastAudit.checks || []).filter((c) => c.status === "FAIL").length;
+  const pinCount = (assessment.field_pins || []).length;
+
+  const chip = (cls, text, target) =>
+    `<button type="button" class="readiness-chip ${cls}" data-jump-panel="${target}">${text}</button>`;
+
+  const ossmBar = document.getElementById("ossmReadinessBar");
+  if (ossmBar) {
+    ossmBar.innerHTML =
+      `<strong style="color:var(--heading); margin-right:4px;">Pre-Lodgement Check:</strong>` +
+      chip(hasGis ? "ok" : "warn", hasGis ? "✓ Live NSW GIS" : "⚠ Fetch Live GIS", "panel-hub") +
+      chip(photoCnt > 0 ? "ok" : "warn", photoCnt > 0 ? `✓ ${photoCnt} Site Photo${photoCnt === 1 ? "" : "s"}` : "⚠ Add Site Photos", "panel-field") +
+      chip(bhOk ? "ok" : "warn", bhOk ? `✓ ${bhs.length} BH (≥1000 mm)` : `⚠ ${bhs.length} BH / ${minBhDepth} mm`, "panel-ossm-soil") +
+      chip(failCount === 0 ? "ok" : "fail", failCount === 0 ? "✓ 0 Compliance FAILs" : `✕ ${failCount} Compliance FAIL`, "panel-ossm-model") +
+      chip(pinCount > 0 ? "ok" : "warn", pinCount > 0 ? `✓ ${pinCount} MGA56 Pin${pinCount === 1 ? "" : "s"}` : "○ Drop Map Pins (Opt)", "panel-hub");
+    ossmBar.querySelectorAll("[data-jump-panel]").forEach((b) =>
+      b.addEventListener("click", () => switchTab(b.dataset.jumpPanel)),
+    );
+  }
+
+  const seeBar = document.getElementById("seeReadinessBar");
+  if (seeBar) {
+    const seeSummary = (document.getElementById("seeSummary")?.value || "").trim();
+    const linkOssm = document.getElementById("seeLinkOssm")?.checked !== false;
+    seeBar.innerHTML =
+      `<strong style="color:var(--heading); margin-right:4px;">DA Readiness:</strong>` +
+      chip(hasGis ? "ok" : "warn", hasGis ? "✓ Live LEP / Hazard GIS" : "⚠ Fetch Live GIS", "panel-hub") +
+      chip(photoCnt > 0 ? "ok" : "warn", photoCnt > 0 ? `✓ ${photoCnt} Site Photo${photoCnt === 1 ? "" : "s"}` : "⚠ Add Site Photos", "panel-field") +
+      chip(seeSummary.length > 10 ? "ok" : "warn", seeSummary.length > 10 ? "✓ Proposal Summary" : "⚠ Add Proposal Summary", "panel-see-plan") +
+      chip(linkOssm ? "ok" : "warn", linkOssm ? "✓ Linked OSSM Cl. 6.9" : "○ OSSM Unlinked", "panel-see-plan");
+    seeBar.querySelectorAll("[data-jump-panel]").forEach((b) =>
+      b.addEventListener("click", () => switchTab(b.dataset.jumpPanel)),
+    );
+  }
+}
+
 function renderEmbeddedDrawingsPreview() {
   if (!assessment || !lastModel || !lastAudit) return;
   const elTT = document.getElementById("prevTreatmentTrain");
   const elGis = document.getElementById("prevGisMap");
+  const elBh = document.getElementById("prevBoreholeProfile");
+  const elSizing = document.getElementById("prevSizingChart");
   const elGrWrap = document.getElementById("prevGreaseWrap");
   const elGr = document.getElementById("prevGreaseXsec");
   const elSep = document.getElementById("prevSepticXsec");
@@ -662,10 +909,14 @@ function renderEmbeddedDrawingsPreview() {
   const elLaaLabel = document.getElementById("prevLaaLabel");
 
   if (elTT) elTT.innerHTML = renderTreatmentTrainSvg(assessment, lastModel);
-  const gisSvgStr = renderGisSiteMapSvg(assessment, spatial);
+  const gisSvgStr = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION" });
   if (elGis) elGis.innerHTML = gisSvgStr;
+  if (elBh) elBh.innerHTML = renderBoreholeProfileSvg(assessment, lastModel, lastAudit);
+  if (elSizing) elSizing.innerHTML = renderSizingAndWaterBalanceSvg(assessment, lastModel);
   const elSeeGis = document.getElementById("prevSeeGisMap");
-  if (elSeeGis) elSeeGis.innerHTML = gisSvgStr;
+  if (elSeeGis) {
+    elSeeGis.innerHTML = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" });
+  }
 
   const hasGrease = (lastModel.grease_arrestor_min_l || 0) > 0;
   if (elGrWrap) elGrWrap.style.display = hasGrease ? "block" : "none";
@@ -749,6 +1000,116 @@ document.getElementById("btnAddBorehole").addEventListener("click", () => {
 // ============================================================================
 // INTERACTIVE MAP + PIN PLACEMENT + LIVE NSW GIS
 // ============================================================================
+function recomputePinLocalCoords() {
+  const pins = assessment?.field_pins || [];
+  if (!pins.length) return;
+  const resolveMga = (p) => {
+    if (p.easting_mga56 && p.northing_mga56 && Math.abs(p.northing_mga56) > 1000) {
+      return [Number(p.easting_mga56), Number(p.northing_mga56)];
+    }
+    if (p.longitude != null && p.latitude != null) {
+      return wgs84ToMga56(Number(p.longitude), Number(p.latitude));
+    }
+    if (p.easting_mga56 && p.northing_mga56 && Math.abs(p.northing_mga56) <= 90) {
+      return wgs84ToMga56(Number(p.easting_mga56), Number(p.northing_mga56));
+    }
+    return null;
+  };
+  const dwPin = pins.find((p) => p.feature_type === "dwelling");
+  let origin = dwPin ? resolveMga(dwPin) : null;
+  if (!origin && spatial?.centroid_easting_mga56 && spatial?.centroid_northing_mga56) {
+    origin = [Number(spatial.centroid_easting_mga56), Number(spatial.centroid_northing_mga56)];
+  }
+  if (!origin) origin = resolveMga(pins[0]);
+  if (!origin) return;
+
+  for (const p of pins) {
+    const mga = resolveMga(p);
+    if (!mga) continue;
+    p.easting_mga56 = mga[0];
+    p.northing_mga56 = mga[1];
+    p.local_x_m = Math.round((mga[0] - origin[0]) * 100) / 100;
+    p.local_y_m = Math.round((mga[1] - origin[1]) * 100) / 100;
+  }
+}
+
+function dropPinAtLatLng(ptype, lat, lng) {
+  const [easting, northing] = wgs84ToMga56(lng, lat);
+  assessment.field_pins = assessment.field_pins || [];
+  const bhCount = assessment.field_pins.filter((p) => p.feature_type === "borehole").length;
+  const label = ptype === "borehole" ? `BH${bhCount + 1}` : ptype.replace(/_/g, " ").toUpperCase();
+  if (ptype !== "borehole") {
+    assessment.field_pins = assessment.field_pins.filter((p) => p.feature_type !== ptype);
+  }
+  assessment.field_pins.push({
+    label,
+    feature_type: ptype,
+    local_x_m: 0,
+    local_y_m: 0,
+    easting_mga56: easting,
+    northing_mga56: northing,
+    latitude: Number(lat.toFixed(6)),
+    longitude: Number(lng.toFixed(6)),
+  });
+  recomputePinLocalCoords();
+  renderMapPins();
+  syncStateFromForm();
+  return { label, easting, northing };
+}
+
+function updatePinModeUi() {
+  const sel = document.getElementById("pinTypeSelect");
+  const mapEl = document.getElementById("wbMap");
+  const banner = document.getElementById("pinModeBanner");
+  const txt = document.getElementById("pinModeText");
+  const val = sel?.value || "";
+  if (mapEl) mapEl.classList.toggle("pin-mode", Boolean(val));
+  if (banner) banner.classList.toggle("active", Boolean(val));
+  if (txt && val) {
+    const label = sel.options[sel.selectedIndex]?.text || val;
+    txt.textContent = `Pin-Drop Mode: ${label} — click map or tap "Use My GPS" to record GDA2020 MGA56.`;
+  }
+}
+
+document.getElementById("pinTypeSelect")?.addEventListener("change", updatePinModeUi);
+document.getElementById("btnExitPinMode")?.addEventListener("click", () => {
+  const sel = document.getElementById("pinTypeSelect");
+  if (sel) sel.value = "";
+  updatePinModeUi();
+});
+
+document.getElementById("btnDropGpsPin")?.addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    showToast("GPS geolocation is not supported on this browser.", "warn");
+    return;
+  }
+  const sel = document.getElementById("pinTypeSelect");
+  const ptype = sel?.value || "eta_bed";
+  if (sel && !sel.value) {
+    sel.value = ptype;
+    updatePinModeUi();
+  }
+  const btn = document.getElementById("btnDropGpsPin");
+  btn.disabled = true;
+  btn.textContent = "Locating...";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      btn.disabled = false;
+      btn.textContent = "📍 Use My GPS";
+      const { latitude, longitude, accuracy } = pos.coords;
+      const dropped = dropPinAtLatLng(ptype, latitude, longitude);
+      if (wbMap) wbMap.setView([latitude, longitude], Math.max(wbMap.getZoom(), 18));
+      showToast(`Pinned ${dropped.label} via GPS (±${Math.round(accuracy)} m · E${Math.round(dropped.easting)} N${Math.round(dropped.northing)})`, "pass");
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.textContent = "📍 Use My GPS";
+      showToast(`GPS error: ${err.message}`, "error");
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+  );
+});
+
 function initWbMap() {
   if (wbMap) return;
   wbMap = L.map("wbMap").setView([-28.58, 153.18], 13);
@@ -763,16 +1124,8 @@ function initWbMap() {
     const ptype = document.getElementById("pinTypeSelect").value;
     if (!ptype) return;
     const { lat, lng } = ev.latlng;
-    assessment.field_pins = assessment.field_pins || [];
-    assessment.field_pins.push({
-      label: ptype.replace("_", " ").toUpperCase(),
-      feature_type: ptype,
-      local_x_m: 0,
-      local_y_m: 0,
-      easting_mga56: Number(lng.toFixed(6)),
-      northing_mga56: Number(lat.toFixed(6)),
-    });
-    renderMapPins();
+    const dropped = dropPinAtLatLng(ptype, lat, lng);
+    showToast(`Recorded ${dropped.label} (MGA56 E${Math.round(dropped.easting)} N${Math.round(dropped.northing)})`, "info", 2200);
   });
 }
 
@@ -781,15 +1134,57 @@ function renderMapPins() {
   wbPinsLayer.clearLayers();
   const pins = assessment.field_pins || [];
   pins.forEach((p) => {
-    if (p.northing_mga56 && p.easting_mga56 && Math.abs(p.northing_mga56) <= 90) {
-      L.circleMarker([p.northing_mga56, p.easting_mga56], {
+    const lat = p.latitude != null ? p.latitude : (p.northing_mga56 && Math.abs(p.northing_mga56) <= 90 ? p.northing_mga56 : null);
+    const lng = p.longitude != null ? p.longitude : (p.easting_mga56 && Math.abs(p.easting_mga56) <= 180 ? p.easting_mga56 : null);
+    if (lat != null && lng != null) {
+      L.circleMarker([lat, lng], {
         radius: 7, color: "#fff", weight: 2, fillColor: "#b45309", fillOpacity: 0.95,
       }).bindTooltip(p.label, { permanent: true, direction: "top" }).addTo(wbPinsLayer);
     }
   });
-  document.getElementById("pinsList").innerHTML = pins.length
-    ? `Captured Pins (${pins.length}): ` + pins.map((p) => `<span class="badge badge-info" style="margin-right:4px;">${p.label}</span>`).join("")
-    : "Select a feature in 'Drop Pin' and tap the satellite imagery to record GPS coordinates.";
+
+  const etaPin = pins.find((p) => p.feature_type === "eta_bed");
+  let setbackBanner = "";
+  let measuredSetbacks = null;
+  if (etaPin && etaPin.easting_mga56 && etaPin.northing_mga56 && Math.abs(etaPin.northing_mga56) > 1000 && spatial) {
+    measuredSetbacks = computePinSetbacksMeters([etaPin.easting_mga56, etaPin.northing_mga56], spatial);
+    const parts = [];
+    if (measuredSetbacks.boundary_m != null) parts.push(`Boundary: <strong>${measuredSetbacks.boundary_m} m</strong>`);
+    if (measuredSetbacks.watercourse_m != null) parts.push(`Nearest Mapped Watercourse: <strong>${measuredSetbacks.watercourse_m} m</strong>`);
+    if (parts.length) {
+      setbackBanner = `<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span>Measured from LAA Pin (MGA56): ${parts.join(" · ")}</span>
+        <button type="button" id="btnApplyPinSetbacks" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.74rem;">Apply to Setback Fields</button>
+      </div>`;
+    }
+  }
+
+  const listEl = document.getElementById("pinsList");
+  listEl.innerHTML = pins.length
+    ? `<div>Captured MGA56 Pins (${pins.length}): ` +
+      pins.map((p, idx) => `<span class="badge badge-info" style="margin:2px 4px 2px 0;" title="MGA56 E${p.easting_mga56 ?? "—"} N${p.northing_mga56 ?? "—"} (Local ${p.local_x_m ?? 0}m, ${p.local_y_m ?? 0}m)">${p.label} <button type="button" data-rm-pin="${idx}" style="border:none; background:none; color:inherit; cursor:pointer; font-weight:800; padding:0 0 0 3px;">✕</button></span>`).join("") +
+      `</div>${setbackBanner}`
+    : "Select a feature in 'Drop Pin' and tap the satellite imagery to record GDA2020 MGA56 coordinates for CAD & setback checks.";
+
+  listEl.querySelectorAll("[data-rm-pin]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      assessment.field_pins.splice(Number(btn.dataset.rmPin), 1);
+      recomputePinLocalCoords();
+      renderMapPins();
+      syncStateFromForm();
+    });
+  });
+
+  document.getElementById("btnApplyPinSetbacks")?.addEventListener("click", () => {
+    if (!measuredSetbacks) return;
+    if (measuredSetbacks.boundary_m != null) {
+      document.getElementById("fDistBound").value = measuredSetbacks.boundary_m;
+    }
+    if (measuredSetbacks.watercourse_m != null) {
+      document.getElementById("fDistWater").value = measuredSetbacks.watercourse_m;
+    }
+    syncStateFromForm();
+  });
 }
 
 function renderSpatialOnMap() {
@@ -943,29 +1338,71 @@ function renderLocalPhotos() {
     .join("");
   box.querySelectorAll("[data-rm-photo]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      localPhotos = localPhotos.filter((p) => p.id !== btn.dataset.rmPhoto);
+      const rmId = btn.dataset.rmPhoto;
+      localPhotos = localPhotos.filter((p) => p.id !== rmId);
+      deleteOfflinePhoto(rmId).catch(() => {});
       renderLocalPhotos();
+      updateSidebarProgress();
+      updateNetBadge();
     });
   });
 }
 
+async function restoreLocalPhotosFromIdb(draftKey) {
+  localPhotos.forEach((p) => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+  localPhotos = [];
+  const savedPhotos = await listOfflinePhotos(draftKey).catch(() => []);
+  for (const ph of savedPhotos) {
+    if (!ph.bytes) continue;
+    const blob = new Blob([ph.bytes], { type: ph.mimeType || "image/jpeg" });
+    localPhotos.push({
+      id: ph.id,
+      caption: ph.caption,
+      ext: ph.ext || "jpg",
+      mimeType: ph.mimeType || "image/jpeg",
+      bytes: ph.bytes,
+      synced: Boolean(ph.synced),
+      previewUrl: URL.createObjectURL(blob),
+    });
+  }
+  renderLocalPhotos();
+  updateSidebarProgress();
+}
+
 document.getElementById("btnUploadPhoto").addEventListener("click", async () => {
   const fileEl = document.getElementById("photoFileInput");
-  if (!fileEl.files.length) return alert("Choose or capture a photo first.");
+  if (!fileEl.files.length) return showToast("Choose or capture a site photo first.", "warn");
   const file = fileEl.files[0];
   const caption = document.getElementById("photoCaptionInput").value.trim() || file.name.replace(/\.[^.]+$/, "");
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const mimeType = file.type || "image/jpeg";
   const bytes = await file.arrayBuffer();
   const previewUrl = URL.createObjectURL(file);
+  const photoId = `ph_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const draftKey = getDraftKey(activeJobId, assessment);
 
-  localPhotos.push({
-    id: `ph_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  const photoObj = {
+    id: photoId,
     caption,
     ext,
+    mimeType,
     bytes,
+    synced: false,
     previewUrl,
-  });
+  };
+  localPhotos.push(photoObj);
+  // Persist immediately to IndexedDB so offline reloads NEVER lose site photos
+  await saveOfflinePhoto({
+    id: photoId,
+    draftKey,
+    caption,
+    ext,
+    mimeType,
+    bytes,
+    synced: false,
+  }).catch(() => {});
   renderLocalPhotos();
+  updateSidebarProgress();
   document.getElementById("photoCaptionInput").value = "";
   fileEl.value = "";
 
@@ -979,12 +1416,17 @@ document.getElementById("btnUploadPhoto").addEventListener("click", async () => 
         fd.append("kind", "photo");
         fd.append("caption", caption);
         const resp = await fetch(`/consulting/api/jobs/${activeJobId}/files`, { method: "POST", body: fd });
-        if (resp.ok) loadJobFiles(activeJobId);
+        if (resp.ok) {
+          photoObj.synced = true;
+          await markOfflinePhotoSynced(photoId, getDraftKey(activeJobId, assessment)).catch(() => {});
+          loadJobFiles(activeJobId);
+        }
       }
     } catch (_) {
-      // Photo remains safely attached locally for offline .docx embedding
+      // Photo remains safely persisted in IndexedDB for offline .docx embedding & auto-sync when online
     }
   }
+  updateNetBadge();
 });
 
 async function loadJobFiles(jobId) {
@@ -1003,7 +1445,82 @@ async function loadJobFiles(jobId) {
 // ============================================================================
 // D1 DASHBOARD & JOB PERSISTENCE
 // ============================================================================
+function renderFilteredJobsTable() {
+  const jBox = document.getElementById("jobsList");
+  if (!jBox) return;
+  const q = (document.getElementById("dashJobSearch")?.value || "").trim().toLowerCase();
+  const statusF = (document.getElementById("dashJobStatusFilter")?.value || "").trim().toLowerCase();
+  const filtered = dashboardJobsCache.filter((j) => {
+    if (statusF && String(j.status || "").toLowerCase() !== statusF) return false;
+    if (!q) return true;
+    const hay = `${j.project_ref || ""} ${j.applicant_name || ""} ${j.site_address || ""} ${j.lot_number || ""} ${j.plan_label || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (!dashboardJobsCache.length) {
+    jBox.innerHTML = `<p style="color:var(--muted);">No saved jobs in D1 yet. Click <strong>+ Create New Job</strong> to start a project.</p>`;
+    return;
+  }
+  if (!filtered.length) {
+    jBox.innerHTML = `<p style="color:var(--muted);">No jobs match your search/status filter.</p>`;
+    return;
+  }
+
+  const escAttr = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const statuses = ["precheck", "field", "drafted", "qa", "lodged", "approved"];
+  jBox.innerHTML = `<table class="data-table"><thead><tr><th>Ref</th><th>Client &amp; Lot</th><th>Status</th><th>Actions</th></tr></thead><tbody>` +
+    filtered.map((j) => `<tr>
+      <td><strong>${escAttr(j.project_ref)}</strong></td>
+      <td>${escAttr(j.applicant_name)}<br/><span style="font-size:0.78rem; color:var(--muted);">Lot ${escAttr(j.lot_number)} ${escAttr(j.plan_label)}</span></td>
+      <td>
+        <select class="status-select" data-job-status="${escAttr(j.id)}" data-status="${escAttr(j.status)}" aria-label="Job status">
+          ${statuses.map((st) => `<option value="${st}" ${st === j.status ? "selected" : ""}>${st}</option>`).join("")}
+        </select>
+      </td>
+      <td>
+        <div style="display:flex; gap:6px; flex-wrap:nowrap;">
+          <button class="btn btn-outline btn-sm" data-open-job="${escAttr(j.id)}">Open</button>
+          <button class="btn btn-danger-outline btn-sm" data-del-job="${escAttr(j.id)}" data-del-ref="${escAttr(j.project_ref)}" data-del-name="${escAttr(j.applicant_name)}" title="Permanently delete job, D1 records, and all R2 files">Delete</button>
+        </div>
+      </td>
+    </tr>`).join("") + `</tbody></table>`;
+
+  jBox.querySelectorAll("[data-open-job]").forEach((b) =>
+    b.addEventListener("click", () => openJobFromD1(b.dataset.openJob)),
+  );
+  jBox.querySelectorAll("[data-del-job]").forEach((b) =>
+    b.addEventListener("click", () => deleteJobFromD1(b.dataset.delJob, b.dataset.delRef, b.dataset.delName, b)),
+  );
+  jBox.querySelectorAll("[data-job-status]").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const id = sel.dataset.jobStatus;
+      const nextStatus = sel.value;
+      sel.dataset.status = nextStatus;
+      try {
+        const resp = await fetch(`/consulting/api/jobs/${encodeURIComponent(id)}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const row = dashboardJobsCache.find((x) => x.id === id);
+        if (row) row.status = nextStatus;
+        showToast(`Status updated to '${nextStatus}'.`, "pass", 2200);
+      } catch (err) {
+        showToast(`Status update failed: ${err.message}`, "error");
+      }
+    });
+  });
+}
+
+document.getElementById("dashJobSearch")?.addEventListener("input", renderFilteredJobsTable);
+document.getElementById("dashJobStatusFilter")?.addEventListener("change", renderFilteredJobsTable);
+
 async function refreshDashboard() {
+  const offlineDrafts = await listOfflineDrafts().catch(() => []);
+  const kpiOff = document.getElementById("dashKpiOffline");
+  if (kpiOff) kpiOff.textContent = String(offlineDrafts.length);
+
   try {
     const [jr, er] = await Promise.all([
       fetch("/consulting/api/jobs"),
@@ -1011,33 +1528,18 @@ async function refreshDashboard() {
     ]);
     const jobsData = jr.ok ? await jr.json() : { jobs: [] };
     const enqData = er.ok ? await er.json() : { enquiries: [] };
+    dashboardJobsCache = jobsData.jobs || [];
 
-    const jBox = document.getElementById("jobsList");
     const jCnt = document.getElementById("navJobsCount");
-    if (jCnt) jCnt.textContent = String(jobsData.jobs.length || 0);
-    if (!jobsData.jobs.length) {
-      jBox.innerHTML = `<p style="color:var(--muted);">No saved jobs in D1 yet. Click <strong>+ Create New Job</strong> to start a project.</p>`;
-    } else {
-      const escAttr = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-      jBox.innerHTML = `<table class="data-table"><thead><tr><th>Ref</th><th>Client &amp; Lot</th><th>Status</th><th>Actions</th></tr></thead><tbody>` +
-        jobsData.jobs.map((j) => `<tr>
-          <td><strong>${escAttr(j.project_ref)}</strong></td>
-          <td>${escAttr(j.applicant_name)}<br/><span style="font-size:0.78rem; color:var(--muted);">Lot ${escAttr(j.lot_number)} ${escAttr(j.plan_label)}</span></td>
-          <td><span class="badge badge-info">${escAttr(j.status)}</span></td>
-          <td>
-            <div style="display:flex; gap:6px; flex-wrap:nowrap;">
-              <button class="btn btn-outline btn-sm" data-open-job="${escAttr(j.id)}">Open</button>
-              <button class="btn btn-danger-outline btn-sm" data-del-job="${escAttr(j.id)}" data-del-ref="${escAttr(j.project_ref)}" data-del-name="${escAttr(j.applicant_name)}" title="Permanently delete job, D1 records, and all R2 files">Delete</button>
-            </div>
-          </td>
-        </tr>`).join("") + `</tbody></table>`;
-      jBox.querySelectorAll("[data-open-job]").forEach((b) =>
-        b.addEventListener("click", () => openJobFromD1(b.dataset.openJob)),
-      );
-      jBox.querySelectorAll("[data-del-job]").forEach((b) =>
-        b.addEventListener("click", () => deleteJobFromD1(b.dataset.delJob, b.dataset.delRef, b.dataset.delName, b)),
-      );
-    }
+    if (jCnt) jCnt.textContent = String(dashboardJobsCache.length || 0);
+    const kpiTot = document.getElementById("dashKpiTotal");
+    const kpiAct = document.getElementById("dashKpiActive");
+    const kpiEnq = document.getElementById("dashKpiEnq");
+    if (kpiTot) kpiTot.textContent = String(dashboardJobsCache.length);
+    if (kpiAct) kpiAct.textContent = String(dashboardJobsCache.filter((j) => !["lodged", "approved"].includes(j.status)).length);
+    if (kpiEnq) kpiEnq.textContent = String((enqData.enquiries || []).filter((e) => e.status === "new").length);
+
+    renderFilteredJobsTable();
 
     const eBox = document.getElementById("enquiriesList");
     if (!enqData.enquiries.length) {
@@ -1062,7 +1564,35 @@ async function refreshDashboard() {
       );
     }
   } catch (err) {
-    document.getElementById("jobsList").textContent = "Offline — using local browser storage.";
+    const offlineDrafts = await listOfflineDrafts().catch(() => []);
+    const jBox = document.getElementById("jobsList");
+    if (offlineDrafts.length) {
+      const escAttr = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      jBox.innerHTML =
+        `<p style="color:var(--warn-fg); font-weight:600; margin-top:0;">Offline Mode — Showing ${offlineDrafts.length} local IndexedDB draft(s):</p>` +
+        `<table class="data-table"><thead><tr><th>Ref</th><th>Client &amp; Lot</th><th>Saved</th><th></th></tr></thead><tbody>` +
+        offlineDrafts.map((d) => `<tr>
+          <td><strong>${escAttr(d.projectRef)}</strong></td>
+          <td>${escAttr(d.applicantName)}<br/><span style="font-size:0.78rem; color:var(--muted);">Lot ${escAttr(d.lotNumber)} ${escAttr(d.planLabel)}</span></td>
+          <td style="font-size:0.76rem; color:var(--muted);">${escAttr(String(d.updatedAt || "").slice(0, 16).replace("T", " "))}</td>
+          <td><button class="btn btn-outline btn-sm" data-open-idb="${escAttr(d.draftKey)}">Open</button></td>
+        </tr>`).join("") + `</tbody></table>`;
+      jBox.querySelectorAll("[data-open-idb]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          const rec = await getOfflineDraft(b.dataset.openIdb);
+          if (!rec) return;
+          activeJobId = rec.activeJobId || null;
+          assessment = rec.assessment;
+          spatial = rec.spatial || null;
+          await restoreLocalPhotosFromIdb(rec.draftKey);
+          hydrateFormFromState();
+          renderSpatialOnMap();
+          switchTab("panel-hub");
+        });
+      });
+    } else {
+      jBox.textContent = "Offline — using local IndexedDB storage.";
+    }
   }
 }
 
@@ -1073,10 +1603,9 @@ async function openJobFromD1(jobId) {
   activeJobId = data.id;
   assessment = data.assessment;
   spatial = data.spatial;
-  localPhotos = [];
   vaultFiles = [];
   r2JobFiles = [];
-  renderLocalPhotos();
+  await restoreLocalPhotosFromIdb(getDraftKey(activeJobId, assessment));
   hydrateFormFromState();
   renderSpatialOnMap();
   loadJobFiles(jobId);
@@ -1085,9 +1614,12 @@ async function openJobFromD1(jobId) {
 
 async function deleteJobFromD1(jobId, projectRef, applicantName, btnEl) {
   const label = `${projectRef || jobId}${applicantName ? ` (${applicantName})` : ""}`;
-  if (!confirm(`Permanently delete job ${label}?\n\nThis will delete the D1 database record and ALL associated R2 files (uploaded documents, site photos, audio memos, and archived reports). This cannot be undone.`)) {
-    return;
-  }
+  const confirmed = await showConfirmDialog(
+    `Delete job ${label}?`,
+    "This permanently removes the D1 database record and ALL associated R2 files (uploaded documents, site photos, audio memos, and archived reports). This cannot be undone.",
+    "Delete Permanently",
+  );
+  if (!confirmed) return;
   if (btnEl) {
     btnEl.disabled = true;
     btnEl.textContent = "Deleting...";
@@ -1098,6 +1630,8 @@ async function deleteJobFromD1(jobId, projectRef, applicantName, btnEl) {
     let out = {};
     try { out = raw ? JSON.parse(raw) : {}; } catch (_) {}
     if (!resp.ok) throw new Error(out.error || `HTTP ${resp.status}`);
+
+    await deleteOfflineDraft(`job:${jobId}`).catch(() => {});
 
     // If the currently open job was deleted, reset workspace cleanly to a fresh blank draft
     if (activeJobId === jobId) {
@@ -1118,8 +1652,9 @@ async function deleteJobFromD1(jobId, projectRef, applicantName, btnEl) {
       if (wbMap) renderSpatialOnMap();
     }
     await refreshDashboard();
+    showToast(`Deleted job ${label} and associated R2 files.`, "pass");
   } catch (err) {
-    alert(`Failed to delete job: ${err.message}`);
+    showToast(`Failed to delete job: ${err.message}`, "error");
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.textContent = "Delete";
@@ -1170,14 +1705,25 @@ async function saveActiveJobToD1() {
       throw new Error(`HTTP ${resp.status}: ${rawText.slice(0, 200) || "Non-JSON server response"}`);
     }
     if (!resp.ok) throw new Error(out.error || out.detail || `Save failed (HTTP ${resp.status})`);
+    const prevDraftKey = getDraftKey(activeJobId, assessment);
     activeJobId = out.id || activeJobId;
+    const newDraftKey = getDraftKey(activeJobId, assessment);
+    if (prevDraftKey !== newDraftKey) {
+      await rekeyOfflinePhotos(prevDraftKey, newDraftKey).catch(() => {});
+      await deleteOfflineDraft(prevDraftKey).catch(() => {});
+    }
+    await saveOfflineDraft({ draftKey: newDraftKey, activeJobId, assessment, spatial, dirty: false }).catch(() => {});
+    await flushOfflineSyncQueue();
+    markSaved();
     btn.textContent = "Saved to D1 ✓";
-    setTimeout(() => { btn.textContent = "Save Job to D1"; }, 1800);
+    showToast(`Saved ${assessment.project_ref} to Cloudflare D1.`, "pass", 2400);
+    setTimeout(() => { updateSaveStateUi(); }, 1800);
     refreshDashboard();
   } catch (err) {
-    alert(`Saved locally (offline). D1 sync error: ${err.message}`);
+    showToast(`Saved locally in IndexedDB. D1 sync deferred: ${err.message}`, "warn", 4500);
   } finally {
     btn.disabled = false;
+    updateSaveStateUi();
   }
 }
 
@@ -1276,7 +1822,7 @@ document.getElementById("btnConfirmNewJob")?.addEventListener("click", async () 
   const scopeOssm = document.getElementById("njScopeOssm").checked;
   const scopeSee = document.getElementById("njScopeSee").checked;
   if (!scopeOssm && !scopeSee) {
-    alert("Please select at least one consulting deliverable (OSSM, SEE, or Both).");
+    showToast("Select at least one consulting deliverable (OSSM, SEE, or Both).", "warn");
     return;
   }
 
@@ -1369,7 +1915,9 @@ function downloadBlob(blob, filename) {
 document.getElementById("btnCompilePackage").addEventListener("click", async () => {
   syncStateFromForm();
   const btn = document.getElementById("btnCompilePackage");
+  const prog = document.getElementById("ossmProgressTrack");
   btn.disabled = true;
+  if (prog) prog.classList.add("active");
   try {
     logExport("Rasterizing GIS Site Map, CAD Layout Plan, Treatment Train & Engineering Cross-Sections...");
     const hasRb = assessment.treatment_system === "secondary_reed_bed";
@@ -1377,10 +1925,22 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
     const isIrrig = assessment.land_application_type !== "eta_beds";
     const hasGrease = (lastModel.grease_arrestor_min_l || 0) > 0;
 
-    const [cadPngBytes, gisPngBytes, ttPngBytes, greasePngBytes, septicPngBytes, rbPngBytes, laaPngBytes] = await Promise.all([
+    const [
+      cadPngBytes,
+      gisPngBytes,
+      ttPngBytes,
+      sizingPngBytes,
+      bhPngBytes,
+      greasePngBytes,
+      septicPngBytes,
+      rbPngBytes,
+      laaPngBytes,
+    ] = await Promise.all([
       rasterizeSvgToPngArrayBuffer(renderCadLayoutSvg(assessment, lastModel), "CAD Layout"),
-      rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial), "GIS Site Map"),
+      rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION" }), "GIS Site Map"),
       rasterizeSvgToPngArrayBuffer(renderTreatmentTrainSvg(assessment, lastModel), "Treatment Train"),
+      rasterizeSvgToPngArrayBuffer(renderSizingAndWaterBalanceSvg(assessment, lastModel), "Sizing & Water Balance Chart"),
+      (assessment.boreholes || []).length ? rasterizeSvgToPngArrayBuffer(renderBoreholeProfileSvg(assessment, lastModel, lastAudit), "Borehole Soil Profile") : Promise.resolve(null),
       hasGrease ? rasterizeSvgToPngArrayBuffer(renderGreaseArrestorCrossSectionSvg(lastModel), "Grease Arrestor Cross-Section") : Promise.resolve(null),
       !isAwts ? rasterizeSvgToPngArrayBuffer(renderSepticCrossSectionSvg(lastModel), "Septic Cross-Section") : Promise.resolve(null),
       hasRb ? rasterizeSvgToPngArrayBuffer(renderReedBedCrossSectionSvg(assessment, lastModel), "Reed Bed Cross-Section") : Promise.resolve(null),
@@ -1392,11 +1952,13 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
       ),
     ]);
 
-    const embeddedDrawingsCount = [cadPngBytes, gisPngBytes, ttPngBytes, greasePngBytes, septicPngBytes, rbPngBytes, laaPngBytes].filter(Boolean).length;
+    const embeddedDrawingsCount = [cadPngBytes, gisPngBytes, ttPngBytes, sizingPngBytes, bhPngBytes, greasePngBytes, septicPngBytes, rbPngBytes, laaPngBytes].filter(Boolean).length;
     logExport(`Rasterized ${embeddedDrawingsCount} engineering drawing(s). Compiling .DOCX + .DXF in Pyodide...`);
 
     const diagrams = {
       treatment_train: ttPngBytes,
+      sizing_chart: sizingPngBytes,
+      borehole_profile: bhPngBytes,
       grease_xsec: greasePngBytes,
       septic_xsec: septicPngBytes,
       reed_bed_xsec: rbPngBytes,
@@ -1442,10 +2004,13 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
     logExport(`SUCCESS — Compiled ${slug}_OSSM_Report.docx (${Math.round(compiledArtifacts.docxBlob.size / 1024)} KB, embedded ${out.embeddedCount ?? embeddedDrawingsCount} image(s) incl. GIS Map, CAD Plan & Cross-Sections) & ${slug}_Layout_Plan.dxf (${Math.round(compiledArtifacts.dxfBlob.size / 1024)} KB) in browser WebAssembly.`);
     document.getElementById("exportDownloads").style.display = "grid";
     document.getElementById("btnArchiveR2").disabled = false;
+    showToast("Compiled Section 68 OSSM .DOCX + .DXF package.", "pass");
   } catch (err) {
     logExport(`Compile error: ${err.message}`);
+    showToast(`OSSM compile failed: ${err.message}`, "error");
   } finally {
     btn.disabled = false;
+    if (prog) prog.classList.remove("active");
   }
 });
 
@@ -1939,10 +2504,15 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
   const seeInput = buildSeeInputFromForm();
   const btn = document.getElementById("btnCompileSee");
   const logEl = document.getElementById("seeLog");
+  const prog = document.getElementById("seeProgressTrack");
   btn.disabled = true;
+  if (prog) prog.classList.add("active");
   try {
     logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)...`;
-    const gisPngBytes = await rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial), "SEE GIS Site Map");
+    const gisPngBytes = await rasterizeSvgToPngArrayBuffer(
+      renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" }),
+      "SEE GIS Site Map",
+    );
     const photosPayload = localPhotos.map((p) => ({
       caption: p.caption,
       ext: p.ext,
@@ -1966,10 +2536,13 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
     logEl.textContent = `[${new Date().toLocaleTimeString()}] SUCCESS — Compiled ${slug}_Lismore_SEE.docx (${Math.round(compiledSeeArtifact.docxBlob.size / 1024)} KB, ${out.embeddedCount} embedded image(s), ${out.audit?.checks?.length || 0} LEP/DCP/SEPP checks).`;
     document.getElementById("btnDownloadSee").style.display = "inline-flex";
     document.getElementById("btnArchiveSeeR2").disabled = false;
+    showToast("Compiled Lismore SEE .DOCX report.", "pass");
   } catch (err) {
     logEl.textContent = `[${new Date().toLocaleTimeString()}] SEE Compile Error: ${err.message}`;
+    showToast(`SEE compile failed: ${err.message}`, "error");
   } finally {
     btn.disabled = false;
+    if (prog) prog.classList.remove("active");
   }
 });
 
@@ -2038,25 +2611,35 @@ async function boot() {
     el.addEventListener("change", syncStateFromForm);
   });
 
-  // Restore saved local draft or start cleanly with a blank Lismore project
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      activeJobId = parsed.activeJobId || null;
-      assessment = parsed.assessment || createBlankAssessment();
-      spatial = parsed.spatial || null;
-    } catch (_) {
+  // Restore saved IndexedDB multi-job draft (falling back to localStorage) or start cleanly with a blank Lismore project
+  const idbDraft = await getLastOfflineDraft().catch(() => null);
+  if (idbDraft?.assessment) {
+    activeJobId = idbDraft.activeJobId || null;
+    assessment = idbDraft.assessment;
+    spatial = idbDraft.spatial || null;
+    await restoreLocalPhotosFromIdb(idbDraft.draftKey);
+  } else {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        activeJobId = parsed.activeJobId || null;
+        assessment = parsed.assessment || createBlankAssessment();
+        spatial = parsed.spatial || null;
+      } catch (_) {
+        assessment = createBlankAssessment();
+      }
+    } else {
       assessment = createBlankAssessment();
     }
-  } else {
-    assessment = createBlankAssessment();
   }
+  recomputePinLocalCoords();
 
   hydrateFormFromState();
   initWbMap();
   if (spatial) renderSpatialOnMap();
   refreshDashboard();
+  flushOfflineSyncQueue();
 }
 
 boot();

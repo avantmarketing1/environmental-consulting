@@ -18,7 +18,10 @@ const PY_FILES = [
   "enviro_comply/engine/lismore_model.py",
   "enviro_comply/engine/compliance_rules.py",
   "enviro_comply/engine/see_rules.py",
+  "enviro_comply/cad/__init__.py",
+  "enviro_comply/cad/dxf_builder.py",
   "enviro_comply/report/__init__.py",
+  "enviro_comply/report/docx_styles.py",
   "enviro_comply/report/docx_builder.py",
   "enviro_comply/report/see_docx_builder.py",
 ];
@@ -51,101 +54,20 @@ async function initPyodide() {
     pyodide.FS.writeFile(`/home/pyodide/${rel}`, content);
   }
 
-  // Register lightweight pure-ezdxf DXF generator (no matplotlib needed inside browser Pyodide!)
+  // Mount shared single-source-of-truth Python modules (including matplotlib-free cad.dxf_builder!)
   await pyodide.runPythonAsync(`
 import sys, json
 from pathlib import Path
 sys.path.insert(0, "/home/pyodide")
 
-import ezdxf
-from enviro_comply.schemas.ossm import SiteAssessmentInput, SpatialPreCheckResult, TreatmentSystemType
+from enviro_comply.schemas.ossm import SiteAssessmentInput, SpatialPreCheckResult
 from enviro_comply.schemas.see import SEEAssessmentInput
 from enviro_comply.engine.lismore_model import run_lismore_wastewater_model
 from enviro_comply.engine.compliance_rules import audit_lismore_compliance
 from enviro_comply.engine.see_rules import audit_lismore_see
+from enviro_comply.cad.dxf_builder import build_ossm_dxf_bytes
 from enviro_comply.report.docx_builder import build_ossm_docx_report
 from enviro_comply.report.see_docx_builder import build_see_docx_report
-
-def _add_rect_dxf(msp, cx, cy, w, h, layer, hatch_pattern=None):
-    x0, y0 = cx - w / 2.0, cy - h / 2.0
-    pts = [(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h), (x0, y0)]
-    msp.add_lwpolyline(pts, dxfattribs={"layer": layer})
-    if hatch_pattern:
-        hatch = msp.add_hatch(dxfattribs={"layer": layer})
-        hatch.set_pattern_fill(hatch_pattern, scale=0.4)
-        hatch.paths.add_polyline_path(pts[:-1], is_closed=True)
-
-def build_dxf_bytes(inp, model):
-    tr = model.trench_layout
-    has_rb = inp.treatment_system == TreatmentSystemType.SECONDARY_REED_BED
-    is_irrig = inp.land_application_type.value != "eta_beds"
-    dw_x, dw_y, dw_w, dw_l = 0.0, 12.0, 10.0, 6.0
-    st_x, st_y, st_r = 0.0, 4.5, 1.0
-    rb_x, rb_y, rb_w, rb_l = 0.0, 0.5, 1.9, 3.0 * max(1, model.recommended_reed_bed_count)
-    eta_x, eta_y = 0.0, (-5.0 if has_rb else -2.5)
-
-    doc = ezdxf.new("R2010")
-    doc.units = ezdxf.units.M
-    msp = doc.modelspace()
-    if "DASHED" not in doc.linetypes:
-        doc.linetypes.add("DASHED", pattern=[0.6, 0.4, -0.2])
-    for name, color, ltype in [
-        ("1_DWELLING", 7, "CONTINUOUS"), ("2_SEPTIC_TANK", 30, "CONTINUOUS"),
-        ("3_REED_BED", 3, "CONTINUOUS"), ("4_ETA_BED", 5, "CONTINUOUS"),
-        ("5_RESERVE_LAA", 4, "DASHED"), ("6_PIPES", 1, "CONTINUOUS"),
-        ("7_SETBACKS", 2, "DASHED"), ("8_DIVERSION_SWALE", 140, "CONTINUOUS"),
-        ("9_BOREHOLES", 6, "CONTINUOUS"), ("10_VEGETATION", 94, "CONTINUOUS"),
-        ("11_ANNOTATIONS", 7, "CONTINUOUS"), ("12_TITLE_BLOCK", 7, "CONTINUOUS"),
-    ]:
-        doc.layers.add(name, color=color, linetype=ltype)
-
-    _add_rect_dxf(msp, dw_x, dw_y, dw_w, dw_l, "1_DWELLING", "ANSI31")
-    _add_rect_dxf(msp, dw_x, dw_y, dw_w + 6.0, dw_l + 6.0, "7_SETBACKS")
-    msp.add_text("DWELLING", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.45}).set_placement((dw_x, dw_y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER)
-
-    msp.add_circle((st_x, st_y), radius=st_r, dxfattribs={"layer": "2_SEPTIC_TANK"})
-    msp.add_line((st_x - st_r, st_y), (st_x + st_r, st_y), dxfattribs={"layer": "2_SEPTIC_TANK"})
-    msp.add_line((dw_x, dw_y - dw_l/2), (st_x, st_y + st_r), dxfattribs={"layer": "6_PIPES"})
-    msp.add_text(f"{model.septic_tank_min_l}L SEPTIC TANK + FILTER", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.35}).set_placement((st_x + 1.5, st_y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_LEFT)
-
-    if has_rb:
-        _add_rect_dxf(msp, rb_x, rb_y, rb_w, rb_l, "3_REED_BED", "GRAVEL")
-        msp.add_line((st_x, st_y - st_r), (rb_x, rb_y + rb_l/2), dxfattribs={"layer": "6_PIPES"})
-        msp.add_text(f"{model.recommended_reed_bed_count}x REED BED ({model.recommended_reed_bed_provided_m2}m2)", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.35}).set_placement((rb_x + 1.5, rb_y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_LEFT)
-        feed_from = (rb_x, rb_y - rb_l/2)
-    else:
-        feed_from = (st_x, st_y - st_r)
-
-    trench_ys = []
-    if is_irrig:
-        zone_cy = eta_y - tr.trench_width_m / 2.0
-        trench_ys.append(zone_cy)
-        _add_rect_dxf(msp, eta_x, zone_cy, tr.trench_length_m, tr.trench_width_m, "4_ETA_BED", "ANSI37")
-        msp.add_text(f"IRRIGATION ZONE: {tr.trench_length_m:.1f}m x {tr.trench_width_m:.1f}m ({model.required_laa_m2:.1f}m2)", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.45}).set_placement((eta_x, zone_cy), align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER)
-        msp.add_line(feed_from, (eta_x, eta_y), dxfattribs={"layer": "6_PIPES"})
-    else:
-        for i in range(tr.number_of_trenches):
-            ty = eta_y - i * (tr.trench_width_m + tr.trench_separation_m)
-            trench_ys.append(ty)
-            _add_rect_dxf(msp, eta_x, ty, tr.trench_length_m, tr.trench_width_m, "4_ETA_BED", "ANSI37")
-            msp.add_line((eta_x - tr.trench_length_m/2 + 0.5, ty), (eta_x + tr.trench_length_m/2 - 0.5, ty), dxfattribs={"layer": "6_PIPES"})
-            msp.add_text(f"ETA BED {i+1}: {tr.trench_length_m:.1f}m x {tr.trench_width_m:.1f}m", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.35}).set_placement((eta_x + tr.trench_length_m/2 + 0.6, ty), align=ezdxf.enums.TextEntityAlignment.MIDDLE_LEFT)
-        msp.add_line(feed_from, (eta_x, trench_ys[0] + tr.trench_width_m/2), dxfattribs={"layer": "6_PIPES"})
-    swale_y = trench_ys[0] + tr.trench_width_m/2 + 1.5
-    sw_hw = tr.trench_length_m/2 + 2.0
-    msp.add_lwpolyline([(eta_x - sw_hw, swale_y - 0.6), (eta_x - sw_hw + 1.2, swale_y), (eta_x + sw_hw - 1.2, swale_y), (eta_x + sw_hw, swale_y - 0.6)], dxfattribs={"layer": "8_DIVERSION_SWALE"})
-
-    res_y = trench_ys[-1] - tr.trench_width_m/2 - 3.8 - tr.envelope_width_m/2
-    _add_rect_dxf(msp, eta_x, res_y, tr.trench_length_m, tr.envelope_width_m, "5_RESERVE_LAA")
-    msp.add_text(f"RESERVE LAA ({model.reserve_laa_m2:.1f}m2)", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.35}).set_placement((eta_x, res_y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER)
-
-    for idx, (bx, by) in enumerate([(eta_x - tr.trench_length_m/2 - 1.0, trench_ys[0]), (eta_x + tr.trench_length_m/2 + 1.0, trench_ys[-1])]):
-        msp.add_circle((bx, by), radius=0.32, dxfattribs={"layer": "9_BOREHOLES"})
-        msp.add_text(f"BH{idx+1}", dxfattribs={"layer": "11_ANNOTATIONS", "height": 0.30}).set_placement((bx + 0.4, by + 0.3))
-
-    out_path = Path("/tmp/layout.dxf")
-    doc.saveas(str(out_path))
-    return out_path.read_bytes()
 
 def _to_bytes(val):
     if val is None:
@@ -165,6 +87,7 @@ def generate_council_package(
     photos_js=None,
 ):
     inp = SiteAssessmentInput.model_validate_json(assessment_json_str)
+    sp_raw = None
     if spatial_json_str:
         sp_raw = json.loads(spatial_json_str)
         spatial = SpatialPreCheckResult(
@@ -196,7 +119,7 @@ def generate_council_package(
 
     model = run_lismore_wastewater_model(inp)
     audit = audit_lismore_compliance(inp, spatial, model)
-    dxf_bytes = build_dxf_bytes(inp, model)
+    dxf_bytes = build_ossm_dxf_bytes(inp, model, spatial_data=sp_raw)
 
     cad_png_path = None
     b_cad = _to_bytes(cad_png_bytes)

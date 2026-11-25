@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=10" />
+  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=13" />
   <script>
     // Apply saved theme immediately before paint to prevent light/dark flash
     (function () {
@@ -35,18 +35,30 @@
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span id="netBadge" class="badge badge-pass">Online</span>
         <span id="pyBadge" class="badge badge-info">Pyodide: Standby</span>
+        <span id="saveStateMeta" class="save-meta" title="Press Ctrl+S to save to Cloudflare D1"></span>
         <button id="btnThemeToggle" type="button" class="btn btn-ghost-light btn-sm" title="Switch Light / Dark Mode">🌙 Dark</button>
         <button id="btnOpenNewJob" type="button" class="btn btn-ghost-light btn-sm">+ New Job</button>
-        <button id="btnSaveJob" type="button" class="btn btn-accent btn-sm">Save Job to D1</button>
+        <button id="btnSaveJob" type="button" class="btn btn-accent btn-sm" title="Save active job to Cloudflare D1 (Ctrl+S)">Save Job to D1</button>
         <button id="btnSignOut" type="button" class="btn btn-ghost-light btn-sm" style="display:none;" title="Sign out of Consultant Studio">Sign Out</button>
       </div>
     </div>
   </header>
 
+  <!-- MOBILE STEP BAR & DRAWER BACKDROP -->
+  <div class="ws-mobile-bar">
+    <button id="btnMobileMenu" type="button" class="btn btn-outline btn-sm">☰ Steps &amp; Scope</button>
+    <span id="mobileActiveStepLabel" style="font-size:0.82rem; font-weight:700; color:var(--heading); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Dashboard &amp; Leads</span>
+  </div>
+  <div id="wsDrawerBackdrop" class="ws-drawer-backdrop"></div>
+
   <!-- WORKSPACE SHELL (SIDEBAR + MAIN CANVAS) -->
   <div class="ws-shell">
     <!-- LEFT SIDEBAR -->
-    <aside class="ws-sidebar">
+    <aside class="ws-sidebar" id="wsSidebar">
+      <div style="display:flex; justify-content:space-between; align-items:center;" class="ws-sidebar-close">
+        <strong style="font-size:0.9rem; color:var(--heading);">Workflow Navigation</strong>
+        <button id="btnCloseDrawer" type="button" class="btn btn-outline btn-sm">✕</button>
+      </div>
       <div class="ws-nav-group">
         <div class="ws-nav-label">Workspace</div>
         <button class="ws-nav-item active" data-panel="panel-dashboard">
@@ -146,13 +158,31 @@
            PANEL 0: DASHBOARD (D1 JOBS & INCOMING LEADS)
            ================================================================ -->
       <section id="panel-dashboard" class="tab-panel active">
+        <div class="grid-4" style="margin-bottom:16px;">
+          <div class="kpi"><div class="kpi-label">Saved Jobs (D1)</div><div class="kpi-value" id="dashKpiTotal">—</div><div class="kpi-sub">Total consulting projects</div></div>
+          <div class="kpi"><div class="kpi-label">In Progress / QA</div><div class="kpi-value" id="dashKpiActive">—</div><div class="kpi-sub">Precheck, field, drafted &amp; QA</div></div>
+          <div class="kpi"><div class="kpi-label">New Quote Leads</div><div class="kpi-value" id="dashKpiEnq">—</div><div class="kpi-sub">Awaiting review / conversion</div></div>
+          <div class="kpi"><div class="kpi-label">Offline Local Drafts</div><div class="kpi-value" id="dashKpiOffline">—</div><div class="kpi-sub">Persisted in IndexedDB</div></div>
+        </div>
         <div class="grid-2">
           <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
               <h2 style="margin:0; font-size:1.2rem;">Active Projects (Cloudflare D1)</h2>
               <button id="btnNewJobDash" type="button" class="btn btn-primary btn-sm">+ Create New Job</button>
             </div>
-            <div id="jobsList" style="font-size:0.86rem; color:var(--muted);">Loading projects...</div>
+            <div class="dash-toolbar">
+              <input id="dashJobSearch" type="search" placeholder="Search client, Lot/DP, or project ref..." />
+              <select id="dashJobStatusFilter" aria-label="Filter jobs by status">
+                <option value="">All Statuses</option>
+                <option value="precheck">Precheck</option>
+                <option value="field">Field</option>
+                <option value="drafted">Drafted</option>
+                <option value="qa">QA Review</option>
+                <option value="lodged">Lodged</option>
+                <option value="approved">Approved</option>
+              </select>
+            </div>
+            <div id="jobsList" class="table-scroll" style="font-size:0.86rem; color:var(--muted);">Loading projects...</div>
           </div>
 
           <div class="card">
@@ -160,7 +190,7 @@
               <h2 style="margin:0; font-size:1.2rem;">Incoming Quote Requests (/consulting/)</h2>
               <button id="btnRefreshDash" type="button" class="btn btn-outline btn-sm">Refresh</button>
             </div>
-            <div id="enquiriesList" style="font-size:0.86rem; color:var(--muted);">Loading enquiries...</div>
+            <div id="enquiriesList" class="table-scroll" style="font-size:0.86rem; color:var(--muted);">Loading enquiries...</div>
           </div>
         </div>
       </section>
@@ -238,7 +268,7 @@
           <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
               <h2 style="margin:0; font-size:1.18rem;">Interactive Satellite &amp; Pin Map</h2>
-              <div style="display:flex; gap:6px; align-items:center;">
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 <label style="font-size:0.78rem; font-weight:600; color:var(--muted);">Drop Pin:</label>
                 <select id="pinTypeSelect" style="padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:0.8rem; background:var(--surface-input); color:var(--ink);">
                   <option value="">Off (Pan/Zoom)</option>
@@ -249,7 +279,12 @@
                   <option value="reserve_laa">Reserve LAA</option>
                   <option value="borehole">Soil Borehole</option>
                 </select>
+                <button id="btnDropGpsPin" type="button" class="btn btn-outline btn-sm" title="Record selected pin at your device's live GPS location">📍 Use My GPS</button>
               </div>
+            </div>
+            <div id="pinModeBanner" class="pin-mode-banner">
+              <span id="pinModeText">Pin-Drop Mode Active — tap map to drop pin.</span>
+              <button type="button" id="btnExitPinMode" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.72rem;">Done</button>
             </div>
             <div id="wbMap" class="map-box"></div>
             <div id="pinsList" style="margin-top:10px; font-size:0.8rem; color:var(--muted);">
@@ -364,7 +399,11 @@
             <p style="font-size:0.82rem; color:var(--muted); margin-top:0;">
               Emerson Aggregate Class 3 or 4 automatically triggers gypsum amelioration (1.0 kg/m²) in both the compliance audit and ETA cross-section.
             </p>
-            <div id="boreholesContainer"></div>
+            <div id="boreholesContainer" class="table-scroll"></div>
+            <div style="margin-top:14px;">
+              <div class="kpi-label" style="margin-bottom:5px;">Live Stratigraphic Soil Borehole Profile (Embedded in Report Section 5)</div>
+              <div class="drawing-frame" id="liveBoreholeSvgBox" data-zoom-title="Stratigraphic Soil Borehole Profile"></div>
+            </div>
           </div>
         </div>
 
@@ -410,7 +449,7 @@
                   <button type="button" class="btn btn-outline btn-sm" data-add-src="day_visitors_amenities">+ Day Visitors</button>
                 </div>
               </div>
-              <div id="sourcesTableBox" style="font-size:0.8rem; color:var(--muted);">
+              <div id="sourcesTableBox" class="table-scroll" style="font-size:0.8rem; color:var(--muted);">
                 Standard single-dwelling mode (using Bedrooms below). Add sources above for Dual Occupancy, Agritourism Cabins, or Food Processing + Grease Arrestor.
               </div>
               <div class="grid-3" style="gap:8px; margin-top:10px;">
@@ -469,13 +508,17 @@
 
           <div style="display:flex; flex-direction:column; gap:18px;">
             <div class="card">
+              <h2 style="margin-top:0; font-size:1.18rem;">Live Sizing Drivers &amp; Alstonville Water Balance</h2>
+              <div class="drawing-frame" id="liveSizingSvgBox" data-zoom-title="OSmodel300614 LAA Sizing Drivers & Water Balance"></div>
+            </div>
+            <div class="card">
               <h2 style="margin-top:0; font-size:1.18rem;">Live Scaled CAD Layout Preview</h2>
-              <div class="drawing-frame" id="cadSvgBox"></div>
+              <div class="drawing-frame" id="cadSvgBox" data-zoom-title="Scaled OSSM CAD Layout Plan"></div>
             </div>
             <div class="card">
               <h2 style="margin-top:0; font-size:1.18rem;">Lismore Strategy (2013) Compliance Audit</h2>
               <div id="departuresBox" style="margin-bottom:12px;"></div>
-              <div style="overflow-x:auto;" id="complianceTableBox"></div>
+              <div class="table-scroll" id="complianceTableBox"></div>
             </div>
           </div>
         </div>
@@ -505,7 +548,9 @@
             </div>
           </div>
 
-          <div id="exportLog" class="console-box" style="margin-top:14px;">
+          <div id="ossmReadinessBar" class="readiness-strip"></div>
+          <div id="ossmProgressTrack" class="progress-track"><div class="progress-fill"></div></div>
+          <div id="exportLog" class="console-box" style="margin-top:12px;">
             Ready. Optionally draft custom Gemini prose below, inspect your live drawing previews, and click "Compile .DOCX + .DXF Package".
           </div>
 
@@ -569,23 +614,31 @@
               <div class="grid-2" style="gap:14px;">
                 <div>
                   <div class="kpi-label" style="margin-bottom:4px;">Section 3 — GDA2020 GIS Site Location Map (OSSM-GIS-01)</div>
-                  <div class="drawing-frame" id="prevGisMap"></div>
+                  <div class="drawing-frame" id="prevGisMap" data-zoom-title="GDA2020 GIS Site Location Map (OSSM-GIS-01)"></div>
+                </div>
+                <div>
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 5 — Stratigraphic Borehole Profile</div>
+                  <div class="drawing-frame" id="prevBoreholeProfile" data-zoom-title="Stratigraphic Soil Borehole Profile"></div>
+                </div>
+                <div>
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 6 — OSmodel300614 Sizing &amp; Water Balance</div>
+                  <div class="drawing-frame" id="prevSizingChart" data-zoom-title="OSmodel300614 Sizing & Water Balance Chart"></div>
                 </div>
                 <div id="prevGreaseWrap" style="display:none;">
                   <div class="kpi-label" style="margin-bottom:4px;">Section 9.1a — Commercial Grease Arrestor Cross-Section</div>
-                  <div class="drawing-frame" id="prevGreaseXsec"></div>
+                  <div class="drawing-frame" id="prevGreaseXsec" data-zoom-title="Commercial Grease Arrestor Cross-Section"></div>
                 </div>
                 <div>
                   <div class="kpi-label" style="margin-bottom:4px;">Section 9.2 — Septic Tank Cross-Section (AS/NZS 1546.1)</div>
-                  <div class="drawing-frame" id="prevSepticXsec"></div>
+                  <div class="drawing-frame" id="prevSepticXsec" data-zoom-title="Septic Tank Cross-Section"></div>
                 </div>
                 <div id="prevReedBedWrap">
                   <div class="kpi-label" style="margin-bottom:4px;">Section 9.3 — Rigid Reed Bed Cross-Section</div>
-                  <div class="drawing-frame" id="prevReedBedXsec"></div>
+                  <div class="drawing-frame" id="prevReedBedXsec" data-zoom-title="Rigid Reed Bed Cross-Section"></div>
                 </div>
                 <div>
                   <div class="kpi-label" style="margin-bottom:4px;" id="prevLaaLabel">Section 9.4 — Disposal Field Cross-Section</div>
-                  <div class="drawing-frame" id="prevLaaXsec"></div>
+                  <div class="drawing-frame" id="prevLaaXsec" data-zoom-title="Disposal Field Cross-Section"></div>
                 </div>
               </div>
             </div>
@@ -685,7 +738,9 @@
             </div>
           </div>
 
-          <div id="seeLog" class="console-box" style="margin-top:14px;">
+          <div id="seeReadinessBar" class="readiness-strip"></div>
+          <div id="seeProgressTrack" class="progress-track"><div class="progress-fill"></div></div>
+          <div id="seeLog" class="console-box" style="margin-top:12px;">
             Ready. Optionally draft tailored town-planning prose with Gemini below, then click "Compile Lismore SEE (.DOCX)".
           </div>
 
@@ -797,7 +852,33 @@
     </div>
   </div>
 
+  <!-- DRAWING ZOOM LIGHTBOX MODAL -->
+  <div class="ws-modal-backdrop" id="drawingLightbox" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
+    <div class="ws-lightbox">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+        <strong id="lightboxTitle" style="font-size:1.02rem; color:var(--heading);">Engineering Drawing Preview</strong>
+        <button type="button" id="btnCloseLightbox" class="btn btn-outline btn-sm">✕ Close (Esc)</button>
+      </div>
+      <div id="lightboxCanvas" class="ws-lightbox-canvas"></div>
+    </div>
+  </div>
+
+  <!-- STYLED CONFIRMATION MODAL (replaces native window.confirm) -->
+  <div class="ws-modal-backdrop" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+    <div class="ws-modal" style="max-width:480px;">
+      <h3 id="confirmModalTitle" style="margin:0 0 8px; font-size:1.15rem;">Confirm Action</h3>
+      <p id="confirmModalBody" style="margin:0 0 18px; font-size:0.88rem; color:var(--muted); white-space:pre-line;"></p>
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button type="button" id="btnConfirmCancel" class="btn btn-outline btn-sm">Cancel</button>
+        <button type="button" id="btnConfirmOk" class="btn btn-danger-outline btn-sm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NON-BLOCKING TOAST NOTIFICATION STACK -->
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script type="module" src="/consulting/app/app.js?v=10"></script>
+  <script type="module" src="/consulting/app/app.js?v=13"></script>
 </body>
 </html>

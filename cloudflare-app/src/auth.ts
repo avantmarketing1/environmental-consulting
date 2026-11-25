@@ -173,6 +173,127 @@ export function checkRateLimit(key: string, maxRequests: number, windowMs: numbe
   return { allowed: true, retryAfterSec: 0 };
 }
 
+// ============================================================================
+// CRYPTOGRAPHIC CLOUDFLARE ACCESS JWT VERIFICATION (RS256 via JWKS)
+// ============================================================================
+interface CachedJwks {
+  keys: Array<JsonWebKey & { kid?: string }>;
+  fetchedAt: number;
+}
+const jwksCache = new Map<string, CachedJwks>();
+const JWKS_TTL_MS = 10 * 60 * 1000;
+
+async function fetchAccessJwks(teamDomain: string): Promise<Array<JsonWebKey & { kid?: string }>> {
+  const cleanHost = teamDomain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  const cached = jwksCache.get(cleanHost);
+  if (cached && Date.now() - cached.fetchedAt < JWKS_TTL_MS) {
+    return cached.keys;
+  }
+  const resp = await fetch(`https://${cleanHost}/cdn-cgi/access/certs`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) return [];
+  const data = (await resp.json()) as { keys?: Array<JsonWebKey & { kid?: string }> };
+  const keys = Array.isArray(data.keys) ? data.keys : [];
+  jwksCache.set(cleanHost, { keys, fetchedAt: Date.now() });
+  return keys;
+}
+
+/**
+ * Cryptographically verifies Cloudflare Zero Trust Access `Cf-Access-Jwt-Assertion` (RS256).
+ * Fails closed unless signature, issuer (`https://<teamDomain>`), audience (`expectedAud`), and `exp` all match.
+ */
+export async function verifyCloudflareAccessJwt(
+  jwt: string | undefined | null,
+  teamDomain: string | undefined | null,
+  expectedAud: string | undefined | null,
+  jwksOverride?: Array<JsonWebKey & { kid?: string }>,
+): Promise<{ valid: boolean; email: string | null }> {
+  const token = (jwt || "").trim();
+  const domain = (teamDomain || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  const aud = (expectedAud || "").trim();
+  if (!token || !domain || !aud) return { valid: false, email: null };
+
+  const parts = token.split(".");
+  if (parts.length !== 3) return { valid: false, email: null };
+  const [headerB64, payloadB64, sigB64] = parts;
+
+  const headerBytes = fromBase64Url(headerB64);
+  const payloadBytes = fromBase64Url(payloadB64);
+  const sigBytes = fromBase64Url(sigB64);
+  if (!headerBytes || !payloadBytes || !sigBytes) return { valid: false, email: null };
+
+  let header: { alg?: string; kid?: string };
+  let payload: { iss?: string; aud?: string | string[]; exp?: number; nbf?: number; email?: string };
+  try {
+    header = JSON.parse(new TextDecoder().decode(headerBytes));
+    payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+  } catch (_) {
+    return { valid: false, email: null };
+  }
+
+  if (header.alg !== "RS256") return { valid: false, email: null };
+
+  const expectedIss = `https://${domain}`;
+  if (payload.iss !== expectedIss) return { valid: false, email: null };
+
+  const audList = Array.isArray(payload.aud) ? payload.aud : typeof payload.aud === "string" ? [payload.aud] : [];
+  if (!audList.includes(aud)) return { valid: false, email: null };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== "number" || payload.exp <= now) return { valid: false, email: null };
+  if (typeof payload.nbf === "number" && payload.nbf > now + 60) return { valid: false, email: null };
+
+  const keys = jwksOverride ?? (await fetchAccessJwks(domain));
+  const candidateKeys = header.kid ? keys.filter((k) => k.kid === header.kid) : keys;
+  const signingInput = textEnc.encode(`${headerB64}.${payloadB64}`);
+
+  for (const jwk of candidateKeys) {
+    try {
+      const cryptoKey = await crypto.subtle.importKey(
+        "jwk",
+        jwk,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, sigBytes, signingInput);
+      if (ok) {
+        return { valid: true, email: typeof payload.email === "string" ? payload.email : "access-user" };
+      }
+    } catch (_) {
+      // Try next candidate key
+    }
+  }
+  return { valid: false, email: null };
+}
+
+const SAFE_INLINE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "audio/webm",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/wav",
+  "audio/ogg",
+]);
+
+/** Build XSS-hardened headers for serving R2 objects (forces attachment for HTML/SVG/scripts). */
+export function buildSafeFileResponseHeaders(contentType: string | undefined, r2Key: string): Record<string, string> {
+  const baseType = String(contentType || "application/octet-stream").split(";")[0].trim().toLowerCase();
+  const safeName = (r2Key.split("/").pop() || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const isSafeInline = SAFE_INLINE_TYPES.has(baseType);
+  return {
+    "Content-Type": isSafeInline ? baseType : "application/octet-stream",
+    "Content-Disposition": `${isSafeInline ? "inline" : "attachment"}; filename="${safeName}"`,
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox; default-src 'none'",
+  };
+}
+
 export function renderAdminLoginHtml(nextPath = "/consulting/app/"): string {
   const safeNext = nextPath.startsWith("/consulting/app") ? nextPath : "/consulting/app/";
   return `<!doctype html>

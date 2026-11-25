@@ -1,0 +1,240 @@
+[
+  {
+    "name": "single_dwelling_standard_eta",
+    "assessment": {
+      "project_ref": "PARITY-01",
+      "applicant_name": "Parity Test A",
+      "site_address": "10 Sample Ridge Rd, Lismore NSW 2480",
+      "lot_number": "1",
+      "plan_label": "DP100001",
+      "block_size_m2": 10000,
+      "bedrooms": 3,
+      "water_supply": "roof_full_water_saving",
+      "wastewater_components": { "toilet": true, "bathroom": true, "laundry": true, "kitchen": true },
+      "treatment_system": "secondary_reed_bed",
+      "land_application_type": "eta_beds",
+      "buffer_feature": "gully",
+      "buffer_distance_m": 45,
+      "morand_code": "co",
+      "soil_texture_id": 9,
+      "reed_bed_wetted_depth_m": 0.7,
+      "root_zone_depth_mm": 300,
+      "gravel_depth_mm": 300,
+      "trench_width_m": 2.0,
+      "trench_separation_m": 2.0,
+      "site_eval": {
+        "assessment_date": "2026-11-25",
+        "slope_pct": 6.0,
+        "landform": "linear_planar",
+        "aspect": "North-East",
+        "exposure": "high",
+        "depth_to_water_table_m": 3.0,
+        "dist_perennial_watercourse_m": 150,
+        "dist_gully_m": 45,
+        "dist_domestic_bore_m": 300,
+        "dist_property_boundary_m": 20,
+        "boundary_is_downgradient": true,
+        "septic_to_dwelling_m": 4.5,
+        "reserve_laa_available": true
+      },
+      "boreholes": [
+        { "borehole_id": "BH1", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red-brown", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 2 }] },
+        { "borehole_id": "BH2", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red-brown", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 2 }] }
+      ],
+      "consultant": { "name": "Parity Tester" }
+    },
+    "spatial": {
+      "lot_id_string": "1//DP100001",
+      "drinking_water_catchment": false,
+      "flood_planning": false,
+      "acid_sulfate_soils": []
+    }
+  },
+  {
+    "name": "unsuitable_morand_and_primary_violation",
+    "assessment": {
+      "project_ref": "PARITY-02",
+      "applicant_name": "Parity Test B",
+      "site_address": "22 Lowland Flat Rd, Lismore NSW 2480",
+      "lot_number": "2",
+      "plan_label": "DP100002",
+      "block_size_m2": 4000,
+      "bedrooms": 3,
+      "water_supply": "reticulated_standard",
+      "wastewater_components": { "toilet": true, "bathroom": true, "laundry": true, "kitchen": true },
+      "treatment_system": "primary_septic",
+      "land_application_type": "eta_beds",
+      "buffer_feature": "stream",
+      "buffer_distance_m": 60,
+      "morand_code": "bp",
+      "soil_texture_id": 12,
+      "root_zone_depth_mm": 250,
+      "gravel_depth_mm": 250,
+      "trench_width_m": 2.0,
+      "trench_separation_m": 2.0,
+      "site_eval": {
+        "assessment_date": "2026-11-25",
+        "slope_pct": 18.0,
+        "landform": "convergent",
+        "aspect": "South-West",
+        "exposure": "low_sheltered",
+        "surface_dampness": true,
+        "surface_cracking_or_bare": true,
+        "contains_fill": true,
+        "erosion_present": true,
+        "depth_to_water_table_m": 0.8,
+        "dist_perennial_watercourse_m": 60,
+        "dist_gully_m": 25,
+        "dist_domestic_bore_m": 180,
+        "dist_property_boundary_m": 4,
+        "boundary_is_downgradient": true,
+        "septic_to_dwelling_m": 2.0,
+        "reserve_laa_available": false
+      },
+      "boreholes": [
+        { "borehole_id": "BH1", "horizons": [{ "horizon": "B", "depth_top_mm": 100, "depth_bottom_mm": 800, "classification": "Heavy clay", "structure_moist": "massive", "colour": "Grey", "coarse_fragments_pct": 25, "ph": 5.0, "dispersive_class": 4 }] }
+      ],
+      "consultant": { "name": "Parity Tester" }
+    },
+    "spatial": {
+      "lot_id_string": "2//DP100002",
+      "drinking_water_catchment": true,
+      "flood_planning": true,
+      "acid_sulfate_soils": ["Class 3 — ASS"]
+    }
+  },
+  {
+    "name": "reed_bed_area_override_short_hrt",
+    "assessment": {
+      "project_ref": "PARITY-03",
+      "applicant_name": "Parity Test C",
+      "site_address": "5 Override Hill, Lismore NSW 2480",
+      "lot_number": "3",
+      "plan_label": "DP100003",
+      "block_size_m2": 8000,
+      "bedrooms": 4,
+      "water_supply": "roof_standard",
+      "wastewater_components": { "toilet": true, "bathroom": true, "laundry": true, "kitchen": true },
+      "treatment_system": "secondary_reed_bed",
+      "land_application_type": "eta_beds",
+      "buffer_feature": "gully",
+      "buffer_distance_m": 45,
+      "morand_code": "ge",
+      "soil_texture_id": 6,
+      "reed_bed_wetted_depth_m": 0.7,
+      "reed_bed_area_override_m2": 8.0,
+      "root_zone_depth_mm": 300,
+      "gravel_depth_mm": 300,
+      "trench_width_m": 2.0,
+      "trench_separation_m": 2.0,
+      "site_eval": {
+        "assessment_date": "2026-11-25",
+        "slope_pct": 5.0,
+        "aspect": "North",
+        "exposure": "high",
+        "depth_to_water_table_m": 2.5,
+        "reserve_laa_available": true
+      },
+      "boreholes": [
+        { "borehole_id": "BH1", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1100, "classification": "Clay loam", "structure_moist": "strong", "colour": "Brown", "coarse_fragments_pct": 5, "ph": 6.5, "dispersive_class": 1 }] },
+        { "borehole_id": "BH2", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1100, "classification": "Clay loam", "structure_moist": "strong", "colour": "Brown", "coarse_fragments_pct": 5, "ph": 6.5, "dispersive_class": 1 }] }
+      ],
+      "consultant": { "name": "Parity Tester" }
+    },
+    "spatial": {
+      "lot_id_string": "3//DP100003",
+      "nearest_watercourse_m": 82.5,
+      "drinking_water_catchment": false,
+      "flood_planning": false,
+      "acid_sulfate_soils": []
+    }
+  },
+  {
+    "name": "sdi_contiguous_irrigation_4br",
+    "assessment": {
+      "project_ref": "PARITY-04",
+      "applicant_name": "Parity Test D",
+      "site_address": "88 Terrace Dr, Lismore NSW 2480",
+      "lot_number": "4",
+      "plan_label": "DP100004",
+      "block_size_m2": 10000,
+      "bedrooms": 4,
+      "water_supply": "roof_full_water_saving",
+      "wastewater_components": { "toilet": true, "bathroom": true, "laundry": true, "kitchen": true },
+      "treatment_system": "secondary_reed_bed",
+      "land_application_type": "subsurface_drip_irrigation",
+      "buffer_feature": "gully",
+      "buffer_distance_m": 40,
+      "morand_code": "co",
+      "soil_texture_id": 9,
+      "site_eval": {
+        "assessment_date": "2026-11-25",
+        "slope_pct": 16.5,
+        "aspect": "North-East",
+        "exposure": "high",
+        "depth_to_water_table_m": 3.0,
+        "dist_property_boundary_m": 5.0,
+        "boundary_is_downgradient": false,
+        "reserve_laa_available": true
+      },
+      "boreholes": [
+        { "borehole_id": "BH1", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 2 }] },
+        { "borehole_id": "BH2", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 2 }] }
+      ],
+      "consultant": { "name": "Parity Tester" }
+    },
+    "spatial": {
+      "lot_id_string": "4//DP100004",
+      "drinking_water_catchment": false,
+      "flood_planning": false,
+      "acid_sulfate_soils": []
+    }
+  },
+  {
+    "name": "multi_use_commercial_agritourism",
+    "assessment": {
+      "project_ref": "PARITY-05",
+      "applicant_name": "Parity Test E",
+      "site_address": "120 Farm Gate Ln, Lismore NSW 2480",
+      "lot_number": "5",
+      "plan_label": "DP100005",
+      "block_size_m2": 50000,
+      "bedrooms": 3,
+      "development_category": "mixed_farm_development",
+      "grease_arrestor_required": true,
+      "wastewater_sources": [
+        { "label": "Primary Dwelling", "source_type": "dwelling", "units": 1, "bedrooms_per_unit": 3 },
+        { "label": "Agritourism Cabins", "source_type": "agritourism_cabin", "units": 4, "bedrooms_per_unit": 1, "guests_per_unit": 2, "peak_surge_factor": 1.2 },
+        { "label": "Day Visitors", "source_type": "day_visitors_amenities", "units": 25, "bedrooms_per_unit": 0 },
+        { "label": "Food Processing Kitchen", "source_type": "food_processing_commercial", "units": 1, "bedrooms_per_unit": 0, "daily_flow_l_override": 500, "influent_bod_mgl": 650, "requires_grease_trap": true }
+      ],
+      "water_supply": "roof_full_water_saving",
+      "wastewater_components": { "toilet": true, "bathroom": true, "laundry": true, "kitchen": true },
+      "treatment_system": "secondary_reed_bed",
+      "land_application_type": "eta_beds",
+      "buffer_feature": "gully",
+      "buffer_distance_m": 60,
+      "morand_code": "co",
+      "soil_texture_id": 9,
+      "site_eval": {
+        "assessment_date": "2026-11-25",
+        "slope_pct": 8.0,
+        "aspect": "North",
+        "exposure": "high",
+        "depth_to_water_table_m": 3.0,
+        "reserve_laa_available": true
+      },
+      "boreholes": [
+        { "borehole_id": "BH1", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 3 }] },
+        { "borehole_id": "BH2", "horizons": [{ "horizon": "B", "depth_top_mm": 150, "depth_bottom_mm": 1000, "classification": "Light clay", "structure_moist": "strong", "colour": "Red", "coarse_fragments_pct": 5, "ph": 6.0, "dispersive_class": 3 }] }
+      ],
+      "consultant": { "name": "Parity Tester" }
+    },
+    "spatial": {
+      "lot_id_string": "5//DP100005",
+      "drinking_water_catchment": false,
+      "flood_planning": false,
+      "acid_sulfate_soils": []
+    }
+  }
+]

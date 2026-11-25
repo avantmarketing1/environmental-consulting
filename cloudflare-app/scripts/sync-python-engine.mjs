@@ -19,8 +19,10 @@ const filesToCopy = [
   ["src/enviro_comply/engine/compliance_rules.py", "enviro_comply/engine/compliance_rules.py"],
   ["src/enviro_comply/engine/see_rules.py", "enviro_comply/engine/see_rules.py"],
   ["src/enviro_comply/cad/__init__.py", "enviro_comply/cad/__init__.py"],
+  ["src/enviro_comply/cad/dxf_builder.py", "enviro_comply/cad/dxf_builder.py"],
   ["src/enviro_comply/cad/dxf_generator.py", "enviro_comply/cad/dxf_generator.py"],
   ["src/enviro_comply/report/__init__.py", "enviro_comply/report/__init__.py"],
+  ["src/enviro_comply/report/docx_styles.py", "enviro_comply/report/docx_styles.py"],
   ["src/enviro_comply/report/docx_builder.py", "enviro_comply/report/docx_builder.py"],
   ["src/enviro_comply/report/see_docx_builder.py", "enviro_comply/report/see_docx_builder.py"],
 ];

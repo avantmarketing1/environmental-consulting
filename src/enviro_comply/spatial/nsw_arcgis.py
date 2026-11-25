@@ -61,26 +61,63 @@ def _query_geojson(client: httpx.Client, url: str, params: dict[str, Any]) -> li
     return data.get("features", [])
 
 
-def _query_attributes_at_point(
+def _parcel_to_esri_polygon(parcel_wgs: Any, max_vertices: int = 60) -> dict[str, Any]:
+    """Convert a Shapely Polygon/MultiPolygon in WGS84 to a compact Esri JSON polygon."""
+    simplified = parcel_wgs.simplify(0.00005, preserve_topology=True)
+    polys = list(simplified.geoms) if hasattr(simplified, "geoms") else [simplified]
+    rings: list[list[list[float]]] = []
+    for poly in polys[:6]:
+        coords = list(poly.exterior.coords)
+        if len(coords) > max_vertices:
+            step = (len(coords) - 1) / (max_vertices - 1)
+            coords = [coords[min(len(coords) - 1, round(i * step))] for i in range(max_vertices)]
+        rings.append([[round(float(x), 6), round(float(y), 6)] for x, y in coords])
+    return {"rings": rings, "spatialReference": {"wkid": 4326}}
+
+
+def _query_attributes_for_parcel(
     client: httpx.Client,
     layer_url: str,
-    lon: float,
-    lat: float,
-    buffer_deg: float = 0.0001,
+    parcel_wgs: Any,
 ) -> list[dict[str, Any]]:
-    geom = json.dumps(
+    """Query all planning overlay features intersecting ANY part of the parcel polygon (with envelope fallback)."""
+    esri_poly = _parcel_to_esri_polygon(parcel_wgs)
+    if esri_poly["rings"]:
+        try:
+            resp = client.post(
+                f"{layer_url}/query",
+                data={
+                    "geometry": json.dumps(esri_poly),
+                    "geometryType": "esriGeometryPolygon",
+                    "inSR": "4326",
+                    "spatialRel": "esriSpatialRelIntersects",
+                    "outFields": "*",
+                    "returnGeometry": "false",
+                    "f": "json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" not in data:
+                return [f.get("attributes", {}) for f in data.get("features", [])]
+        except Exception:
+            pass
+
+    # Fallback: full parcel bounding envelope
+    minx, miny, maxx, maxy = parcel_wgs.bounds
+    env_geom = json.dumps(
         {
-            "xmin": lon - buffer_deg,
-            "ymin": lat - buffer_deg,
-            "xmax": lon + buffer_deg,
-            "ymax": lat + buffer_deg,
+            "xmin": minx,
+            "ymin": miny,
+            "xmax": maxx,
+            "ymax": maxy,
             "spatialReference": {"wkid": 4326},
         }
     )
     resp = client.get(
         f"{layer_url}/query",
         params={
-            "geometry": geom,
+            "geometry": env_geom,
             "geometryType": "esriGeometryEnvelope",
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
@@ -225,8 +262,7 @@ def run_spatial_precheck(
             except Exception as exc:
                 result.warnings.append(f"Contour query skipped: {exc}")
 
-            # Planning Overlays at parcel centroid (and parcel envelope)
-            cx, cy = float(centroid_wgs.x), float(centroid_wgs.y)
+            # Planning Overlays across the FULL parcel polygon (catches edge/corner flood, riparian & bushfire intersections)
             overlay_specs = [
                 (f"{EPI_BASE}/2", "zoning", ["SYM_CODE", "LAY_CLASS"]),
                 (f"{EPI_BASE}/4", "lot_size", ["LOT_SIZE", "UNITS"]),
@@ -242,7 +278,7 @@ def run_spatial_precheck(
 
             for url, tag, keys in overlay_specs:
                 try:
-                    attrs = _query_attributes_at_point(client, url, cx, cy, buffer_deg=0.0005)
+                    attrs = _query_attributes_for_parcel(client, url, parcel_wgs)
                     labels = _extract_unique_labels(attrs, keys)
                     if tag == "zoning":
                         result.land_zoning = labels
@@ -268,14 +304,12 @@ def run_spatial_precheck(
                 except Exception as exc:
                     result.warnings.append(f"Overlay '{tag}' query skipped: {exc}")
 
-            # Bushfire Prone Land
+            # Bushfire Prone Land (whole parcel)
             try:
-                bf_attrs = _query_attributes_at_point(
+                bf_attrs = _query_attributes_for_parcel(
                     client,
                     "https://mapprod3.environment.nsw.gov.au/arcgis/rest/services/Fire/BFPL/MapServer/0",
-                    cx,
-                    cy,
-                    buffer_deg=0.0005,
+                    parcel_wgs,
                 )
                 result.bushfire_prone_land = _extract_unique_labels(bf_attrs, ["CATEGORY", "Category", "LABEL", "d_Category"])
                 if bf_attrs and not result.bushfire_prone_land:
@@ -306,6 +340,6 @@ def run_spatial_precheck(
     if result.bushfire_prone_land:
         flags.append(f"BUSHFIRE PRONE LAND ({', '.join(result.bushfire_prone_land)}): Protect exposed poly tanks/pipework.")
     if not flags and result.fetched_live:
-        flags.append("No major statutory hazard overlays intersected at parcel centroid; verify local gullies & bores on site.")
+        flags.append("No major statutory hazard overlays intersected across parcel boundary; verify local gullies & bores on site.")
     result.pre_site_flags = flags
     return result

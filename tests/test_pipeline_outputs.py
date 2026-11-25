@@ -40,8 +40,10 @@ def test_full_offline_pipeline_generates_valid_docx_dxf_and_maps(tmp_path: Path)
     assert "480L" not in full_text
     assert "VERA JRRAY" not in full_text
 
-    # Verify full LCC Strategy Part B s1.1 & Wallaby Rd completeness
+    # Verify full LCC Strategy Part B s1.1 & Wallaby Rd completeness + new report polish
     assert "Table of Contents" in full_text
+    assert "Document Control & Revision History" in full_text
+    assert "OSmodel300614 Council Officer Verification Summary" in full_text
     assert "System Selection Justification" in full_text
     assert "Overall Site & Soil Limitation Determination" in full_text
     assert "Daily Loading Rate (DLR / LTR) Verification" in full_text
@@ -49,9 +51,18 @@ def test_full_offline_pipeline_generates_valid_docx_dxf_and_maps(tmp_path: Path)
     assert "Homeowner Guide & Component Operation / Maintenance Manuals" in full_text
     assert "Statutory Installation Steps for NSW Licensed Plumber" in full_text
     assert "Owner's Acknowledgement" in full_text
+    assert "Workbench" not in full_text  # Never leak internal UI instructions into council reports
 
-    # Verify embedded figures: Treatment Train + GIS Site Map + CAD Plan + Septic XSec + Reed Bed XSec + ETA XSec = 6
-    assert len(d.inline_shapes) >= 6, f"Expected >= 6 embedded drawings in DOCX, found {len(d.inline_shapes)}"
+    # Verify true Word Heading 1 styles, repeating table headers (tblHeader), and cover-page header/footer isolation
+    assert any(p.style.name == "Heading 1" for p in d.paragraphs)
+    assert d.sections[0].different_first_page_header_footer is True
+    doc_xml = d.element.xml
+    assert "w:tblHeader" in doc_xml
+    assert "w:cantSplit" in doc_xml
+    assert "TOC \\o" in doc_xml
+
+    # Verify embedded figures: Treatment Train + GIS Site Map + Borehole Profile + Sizing Chart + CAD Plan + Septic XSec + Reed Bed XSec + ETA XSec = 8
+    assert len(d.inline_shapes) >= 8, f"Expected >= 8 embedded drawings in DOCX, found {len(d.inline_shapes)}"
 
 
 def test_multi_use_agritourism_food_processing_with_grease_trap_and_custom_narratives(tmp_path: Path):
@@ -87,7 +98,8 @@ def test_multi_use_agritourism_food_processing_with_grease_trap_and_custom_narra
     )
     assert "Multi-Use / Commercial Wastewater Source Breakdown" in full_text
     assert "Commercial Grease Arrestor" in full_text
+    assert "Appendix C — Commercial / Multi-Use" in full_text
     assert "artisan food processing kitchen" in full_text
     assert "laminated eco-cabin guest cards" in full_text
-    # 7 embedded figures: Treatment Train + GIS Map + CAD Plan + Grease Arrestor XSec + Septic XSec + Reed Bed XSec + ETA XSec
-    assert len(d.inline_shapes) >= 7, f"Expected >= 7 embedded drawings incl. Grease Arrestor XSec, found {len(d.inline_shapes)}"
+    # 9 embedded figures: Treatment Train + GIS Map + Borehole Profile + Sizing Chart + CAD Plan + Grease Arrestor XSec + Septic XSec + Reed Bed XSec + ETA XSec
+    assert len(d.inline_shapes) >= 9, f"Expected >= 9 embedded drawings incl. Grease Arrestor, Borehole & Sizing charts, found {len(d.inline_shapes)}"
