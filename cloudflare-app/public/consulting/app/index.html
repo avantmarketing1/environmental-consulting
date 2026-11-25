@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=13" />
+  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=14" />
   <script>
     // Apply saved theme immediately before paint to prevent light/dark flash
     (function () {
@@ -265,30 +265,70 @@
             </div>
           </div>
 
-          <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-              <h2 style="margin:0; font-size:1.18rem;">Interactive Satellite &amp; Pin Map</h2>
-              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                <label style="font-size:0.78rem; font-weight:600; color:var(--muted);">Drop Pin:</label>
-                <select id="pinTypeSelect" style="padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:0.8rem; background:var(--surface-input); color:var(--ink);">
-                  <option value="">Off (Pan/Zoom)</option>
-                  <option value="dwelling">Dwelling / Building</option>
-                  <option value="septic_tank">Septic Tank</option>
-                  <option value="reed_bed">Reed Bed</option>
-                  <option value="eta_bed">ETA Bed / LAA</option>
-                  <option value="reserve_laa">Reserve LAA</option>
-                  <option value="borehole">Soil Borehole</option>
-                </select>
-                <button id="btnDropGpsPin" type="button" class="btn btn-outline btn-sm" title="Record selected pin at your device's live GPS location">📍 Use My GPS</button>
+          <div class="card map-studio-wrap" id="mapStudioCard">
+            <div class="map-toolbar-row">
+              <h2 style="margin:0; font-size:1.18rem;">Interactive GIS &amp; Pin Map Studio</h2>
+              <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
+                <button id="btnMapFitLot" type="button" class="btn btn-outline btn-sm" title="Zoom to subject parcel boundary">⌖ Fit Lot</button>
+                <button id="btnMapMeasure" type="button" class="btn btn-outline btn-sm" title="Measure distances in metres on the map">📏 Measure</button>
+                <button id="btnDropGpsPin" type="button" class="btn btn-outline btn-sm" title="Drop active pin at your device's live GPS location">📍 My GPS</button>
+                <button id="btnMapExpand" type="button" class="btn btn-outline btn-sm" title="Expand map to full screen">⛶ Expand</button>
               </div>
             </div>
+
+            <!-- Basemap Layer Switcher -->
+            <div class="map-toolbar-row" style="margin-bottom:6px;">
+              <div class="map-basemap-bar" id="mapBasemapBar" role="group" aria-label="Map basemap style">
+                <button type="button" class="basemap-btn active" data-basemap="satellite">Satellite</button>
+                <button type="button" class="basemap-btn" data-basemap="hybrid">Hybrid</button>
+                <button type="button" class="basemap-btn" data-basemap="nsw_aerial" title="NSW Spatial Services SIX Maps High-Res Aerial">NSW Aerial</button>
+                <button type="button" class="basemap-btn" data-basemap="topo">Topo</button>
+                <button type="button" class="basemap-btn" data-basemap="terrain">Terrain</button>
+                <button type="button" class="basemap-btn" data-basemap="street">Street</button>
+              </div>
+              <div class="map-overlay-toggles" style="margin-bottom:0;">
+                <label><input type="checkbox" id="chkLayerCadastre" checked /> Cadastre</label>
+                <label><input type="checkbox" id="chkLayerContours" checked /> Contours</label>
+                <label><input type="checkbox" id="chkLayerWater" checked /> Creeks &amp; Buffers</label>
+                <label><input type="checkbox" id="chkLayerFootprints" checked /> Footprints</label>
+                <label><input type="checkbox" id="chkLayerLabels" checked /> Labels</label>
+              </div>
+            </div>
+
+            <!-- Custom SVG Pin Palette -->
+            <div class="pin-palette" id="pinPaletteBar" role="group" aria-label="Pin drop tool palette"></div>
+            <select id="pinTypeSelect" style="display:none;" aria-hidden="true">
+              <option value="">Off (Pan/Drag)</option>
+              <option value="dwelling">Dwelling / Building</option>
+              <option value="septic_tank">Septic Tank</option>
+              <option value="grease_arrestor">Grease Arrestor</option>
+              <option value="reed_bed">Reed Bed</option>
+              <option value="pump_well">Pump Well</option>
+              <option value="eta_bed">ETA Bed / LAA</option>
+              <option value="reserve_laa">Reserve LAA</option>
+              <option value="borehole">Soil Borehole</option>
+              <option value="water_tank">Water Tank / Bore</option>
+              <option value="swale">Diversion Swale</option>
+              <option value="tree">Significant Tree</option>
+              <option value="custom">Site Feature</option>
+            </select>
+
             <div id="pinModeBanner" class="pin-mode-banner">
               <span id="pinModeText">Pin-Drop Mode Active — tap map to drop pin.</span>
-              <button type="button" id="btnExitPinMode" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.72rem;">Done</button>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button type="button" id="btnClearMeasure" class="btn btn-outline btn-sm" style="display:none; padding:2px 8px; font-size:0.72rem;">Clear Line</button>
+                <button type="button" id="btnExitPinMode" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.72rem;">Done</button>
+              </div>
             </div>
+
             <div id="wbMap" class="map-box"></div>
+            <div id="mapStatusBar" class="map-status-bar">
+              <span id="mapCursorCoords">Move cursor over map for GDA2020 MGA56 coordinates</span>
+              <span id="mapMeasureReadout" style="color:var(--forest-700); font-weight:700;">Drag any pin to move · Click a pin to rename, rotate or delete</span>
+            </div>
+
             <div id="pinsList" style="margin-top:10px; font-size:0.8rem; color:var(--muted);">
-              Select a feature in 'Drop Pin' and click the satellite map to log GDA2020 coordinates.
+              Pick a feature icon above and click the map (or tap <strong>My GPS</strong>) to place scaled GDA2020 pins.
             </div>
           </div>
         </div>
@@ -879,6 +919,6 @@
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script type="module" src="/consulting/app/app.js?v=13"></script>
+  <script type="module" src="/consulting/app/app.js?v=14"></script>
 </body>
 </html>

@@ -7,10 +7,12 @@ import {
   wgs84ToMga56,
 } from "./lismore-engine.js";
 import {
+  PIN_FEATURE_SPECS,
   renderBoreholeProfileSvg,
   renderEtaCrossSectionSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
+  renderPinMarkerSvg,
   renderReedBedCrossSectionSvg,
   renderSdiCrossSectionSvg,
   renderSepticCrossSectionSvg,
@@ -56,8 +58,18 @@ let isDirty = false;
 let lastSavedAt = null;
 
 let wbMap = null;
-let wbGisLayer = null;
+let wbBaseLayer = null;
+let wbBaseRefLayer = null;
+let wbCadastreLayer = null;
+let wbContoursLayer = null;
+let wbWaterLayer = null;
+let wbFootprintsLayer = null;
 let wbPinsLayer = null;
+let wbMeasureLayer = null;
+let wbParcelBounds = null;
+let activeBasemap = localStorage.getItem("ftf_basemap") || "satellite";
+let measureModeActive = false;
+let measurePoints = [];
 
 // ============================================================================
 // NON-BLOCKING TOASTS, STYLED CONFIRM MODAL, LIGHTBOX & SAVE STATE UI
@@ -158,12 +170,22 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// Global Keyboard Shortcuts: Escape closes modals/drawers; Ctrl+S / Cmd+S saves active job to D1
+// Global Keyboard Shortcuts: Escape closes modals/drawers/expanded map; Ctrl+S / Cmd+S saves active job to D1
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeDrawingLightbox();
     closeMobileDrawer();
     document.getElementById("newJobModal")?.classList.remove("open");
+    const mapCard = document.getElementById("mapStudioCard");
+    if (mapCard?.classList.contains("map-expanded")) {
+      mapCard.classList.remove("map-expanded");
+      const btn = document.getElementById("btnMapExpand");
+      if (btn) btn.textContent = "⛶ Expand";
+      setTimeout(() => wbMap?.invalidateSize(), 60);
+    }
+    if (measureModeActive || document.getElementById("pinTypeSelect")?.value) {
+      exitMapInteractiveModes();
+    }
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
@@ -909,13 +931,13 @@ function renderEmbeddedDrawingsPreview() {
   const elLaaLabel = document.getElementById("prevLaaLabel");
 
   if (elTT) elTT.innerHTML = renderTreatmentTrainSvg(assessment, lastModel);
-  const gisSvgStr = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION" });
+  const gisSvgStr = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: lastModel });
   if (elGis) elGis.innerHTML = gisSvgStr;
   if (elBh) elBh.innerHTML = renderBoreholeProfileSvg(assessment, lastModel, lastAudit);
   if (elSizing) elSizing.innerHTML = renderSizingAndWaterBalanceSvg(assessment, lastModel);
   const elSeeGis = document.getElementById("prevSeeGisMap");
   if (elSeeGis) {
-    elSeeGis.innerHTML = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" });
+    elSeeGis.innerHTML = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel });
   }
 
   const hasGrease = (lastModel.grease_arrestor_min_l || 0) > 0;
@@ -998,17 +1020,86 @@ document.getElementById("btnAddBorehole").addEventListener("click", () => {
 });
 
 // ============================================================================
-// INTERACTIVE MAP + PIN PLACEMENT + LIVE NSW GIS
+// INTERACTIVE GIS & PIN MAP STUDIO (BASEMAPS, CUSTOM SVGS, DRAG/EDIT/MEASURE)
 // ============================================================================
+const MAP_BASEMAPS = {
+  satellite: {
+    name: "Satellite",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Imagery &copy; Esri | Cadastre &copy; NSW Spatial Services",
+    maxZoom: 19,
+  },
+  hybrid: {
+    name: "Hybrid",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    refUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Imagery &amp; Labels &copy; Esri | Cadastre &copy; NSW Spatial Services",
+    maxZoom: 19,
+  },
+  nsw_aerial: {
+    name: "NSW Aerial",
+    url: "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Aerial Imagery &amp; Cadastre &copy; NSW Spatial Services (SIX Maps)",
+    maxZoom: 20,
+  },
+  topo: {
+    name: "Topo",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Topographic &copy; Esri | Cadastre &copy; NSW Spatial Services",
+    maxZoom: 19,
+  },
+  terrain: {
+    name: "Terrain",
+    url: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+    attribution: "Map data &copy; OpenStreetMap, SRTM | Style &copy; OpenTopoMap",
+    maxZoom: 17,
+  },
+  street: {
+    name: "Street",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors | Cadastre &copy; NSW Spatial Services",
+    maxZoom: 19,
+  },
+};
+
+const PALETTE_TYPES = [
+  { type: "", label: "Pan / Drag" },
+  { type: "dwelling", label: "Dwelling" },
+  { type: "septic_tank", label: "Septic" },
+  { type: "reed_bed", label: "Reed Bed" },
+  { type: "eta_bed", label: "ETA / LAA" },
+  { type: "reserve_laa", label: "Reserve" },
+  { type: "borehole", label: "Borehole" },
+  { type: "grease_arrestor", label: "Grease Trap" },
+  { type: "pump_well", label: "Pump Well" },
+  { type: "water_tank", label: "Water Tank" },
+  { type: "swale", label: "Swale" },
+  { type: "custom", label: "Custom" },
+];
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getPinLatLng(p) {
+  const lat = p.latitude != null ? Number(p.latitude) : (p.northing_mga56 && Math.abs(p.northing_mga56) <= 90 ? Number(p.northing_mga56) : null);
+  const lng = p.longitude != null ? Number(p.longitude) : (p.easting_mga56 && Math.abs(p.easting_mga56) <= 180 ? Number(p.easting_mga56) : null);
+  return lat != null && lng != null ? [lat, lng] : null;
+}
+
 function recomputePinLocalCoords() {
   const pins = assessment?.field_pins || [];
   if (!pins.length) return;
   const resolveMga = (p) => {
-    if (p.easting_mga56 && p.northing_mga56 && Math.abs(p.northing_mga56) > 1000) {
-      return [Number(p.easting_mga56), Number(p.northing_mga56)];
-    }
     if (p.longitude != null && p.latitude != null) {
       return wgs84ToMga56(Number(p.longitude), Number(p.latitude));
+    }
+    if (p.easting_mga56 && p.northing_mga56 && Math.abs(p.northing_mga56) > 1000) {
+      return [Number(p.easting_mga56), Number(p.northing_mga56)];
     }
     if (p.easting_mga56 && p.northing_mga56 && Math.abs(p.northing_mga56) <= 90) {
       return wgs84ToMga56(Number(p.easting_mga56), Number(p.northing_mga56));
@@ -1033,19 +1124,23 @@ function recomputePinLocalCoords() {
   }
 }
 
-function dropPinAtLatLng(ptype, lat, lng) {
+function nextDefaultLabelForType(ptype) {
+  const existing = (assessment.field_pins || []).filter((p) => p.feature_type === ptype);
+  if (ptype === "borehole") return `BH${existing.length + 1}`;
+  const base = PIN_FEATURE_SPECS[ptype]?.shortLabel || ptype.replace(/_/g, " ").toUpperCase();
+  return existing.length === 0 ? base : `${base} ${existing.length + 1}`;
+}
+
+function dropPinAtLatLng(ptype, lat, lng, customLabel = null) {
   const [easting, northing] = wgs84ToMga56(lng, lat);
   assessment.field_pins = assessment.field_pins || [];
-  const bhCount = assessment.field_pins.filter((p) => p.feature_type === "borehole").length;
-  const label = ptype === "borehole" ? `BH${bhCount + 1}` : ptype.replace(/_/g, " ").toUpperCase();
-  if (ptype !== "borehole") {
-    assessment.field_pins = assessment.field_pins.filter((p) => p.feature_type !== ptype);
-  }
+  const label = customLabel || nextDefaultLabelForType(ptype);
   assessment.field_pins.push({
     label,
     feature_type: ptype,
     local_x_m: 0,
     local_y_m: 0,
+    rotation_deg: 0,
     easting_mga56: easting,
     northing_mga56: northing,
     latitude: Number(lat.toFixed(6)),
@@ -1057,25 +1152,191 @@ function dropPinAtLatLng(ptype, lat, lng) {
   return { label, easting, northing };
 }
 
+function renderPinPalette() {
+  const bar = document.getElementById("pinPaletteBar");
+  if (!bar) return;
+  const cur = document.getElementById("pinTypeSelect")?.value || "";
+  bar.innerHTML = PALETTE_TYPES.map((item) => {
+    const icon = item.type
+      ? renderPinMarkerSvg(item.type, 17)
+      : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="16" height="16"><path d="M10 2 L13 5 H11 V9 H15 V7 L18 10 L15 13 V11 H11 V15 H13 L10 18 L7 15 H9 V11 H5 V13 L2 10 L5 7 V9 H9 V5 H7 Z" fill="currentColor"/></svg>`;
+    const isActive = !measureModeActive && cur === item.type;
+    return `<button type="button" class="pin-palette-btn${isActive ? " active" : ""}" data-palette-type="${item.type}" title="${item.type ? `Drop ${PIN_FEATURE_SPECS[item.type]?.label || item.label} pin` : "Pan map and drag existing pins"}">${icon}<span>${item.label}</span></button>`;
+  }).join("");
+
+  bar.querySelectorAll("[data-palette-type]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (measureModeActive) setMeasureMode(false);
+      const sel = document.getElementById("pinTypeSelect");
+      if (sel) sel.value = btn.dataset.paletteType;
+      updatePinModeUi();
+    });
+  });
+}
+
+function exitMapInteractiveModes() {
+  const sel = document.getElementById("pinTypeSelect");
+  if (sel) sel.value = "";
+  if (measureModeActive) setMeasureMode(false);
+  updatePinModeUi();
+}
+
 function updatePinModeUi() {
   const sel = document.getElementById("pinTypeSelect");
   const mapEl = document.getElementById("wbMap");
   const banner = document.getElementById("pinModeBanner");
   const txt = document.getElementById("pinModeText");
+  const clrBtn = document.getElementById("btnClearMeasure");
   const val = sel?.value || "";
-  if (mapEl) mapEl.classList.toggle("pin-mode", Boolean(val));
-  if (banner) banner.classList.toggle("active", Boolean(val));
-  if (txt && val) {
-    const label = sel.options[sel.selectedIndex]?.text || val;
-    txt.textContent = `Pin-Drop Mode: ${label} — click map or tap "Use My GPS" to record GDA2020 MGA56.`;
+
+  if (mapEl) {
+    mapEl.classList.toggle("pin-mode", Boolean(val) && !measureModeActive);
+    mapEl.classList.toggle("measure-mode", measureModeActive);
   }
+  if (banner) banner.classList.toggle("active", Boolean(val) || measureModeActive);
+  if (clrBtn) clrBtn.style.display = measureModeActive ? "inline-flex" : "none";
+  if (txt) {
+    if (measureModeActive) {
+      const totalM = computeMeasureTotalMeters();
+      txt.textContent = measurePoints.length
+        ? `Measure Mode: ${measurePoints.length} point(s) · Total Distance = ${totalM.toFixed(1)} m — click to add vertices.`
+        : "Measure Mode Active — click two or more points on the map to measure distance in metres.";
+    } else if (val) {
+      const label = PIN_FEATURE_SPECS[val]?.label || val;
+      txt.textContent = `Pin-Drop Mode (${label}) — click map or tap "My GPS" to place pin. Drag any pin to reposition.`;
+    }
+  }
+  renderPinPalette();
+}
+
+function setBasemap(key) {
+  const cfg = MAP_BASEMAPS[key] || MAP_BASEMAPS.satellite;
+  activeBasemap = key in MAP_BASEMAPS ? key : "satellite";
+  localStorage.setItem("ftf_basemap", activeBasemap);
+  if (wbMap) {
+    if (wbBaseLayer) wbMap.removeLayer(wbBaseLayer);
+    if (wbBaseRefLayer) {
+      wbMap.removeLayer(wbBaseRefLayer);
+      wbBaseRefLayer = null;
+    }
+    wbBaseLayer = L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom }).addTo(wbMap);
+    wbBaseLayer.bringToBack();
+    if (cfg.refUrl) {
+      wbBaseRefLayer = L.tileLayer(cfg.refUrl, { maxZoom: cfg.maxZoom, opacity: 0.92 }).addTo(wbMap);
+    }
+  }
+  document.querySelectorAll("#mapBasemapBar .basemap-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.basemap === activeBasemap);
+  });
+}
+
+function computeMeasureTotalMeters() {
+  let sum = 0;
+  for (let i = 1; i < measurePoints.length; i++) {
+    sum += measurePoints[i - 1].distanceTo(measurePoints[i]);
+  }
+  return sum;
+}
+
+function renderMeasureOverlay() {
+  if (!wbMeasureLayer) return;
+  wbMeasureLayer.clearLayers();
+  const readout = document.getElementById("mapMeasureReadout");
+  if (!measurePoints.length) {
+    if (readout) readout.textContent = "Drag any pin to move · Click a pin to rename, rotate or delete";
+    return;
+  }
+  const latlngs = measurePoints.map((p) => [p.lat, p.lng]);
+  if (latlngs.length >= 2) {
+    L.polyline(latlngs, { color: "#0284c7", weight: 3, dashArray: "6,6" }).addTo(wbMeasureLayer);
+  }
+  let running = 0;
+  measurePoints.forEach((pt, idx) => {
+    if (idx > 0) {
+      const seg = measurePoints[idx - 1].distanceTo(pt);
+      running += seg;
+      const mid = [(measurePoints[idx - 1].lat + pt.lat) / 2, (measurePoints[idx - 1].lng + pt.lng) / 2];
+      L.marker(mid, {
+        interactive: false,
+        icon: L.divIcon({
+          className: "leaflet-custom-pin",
+          html: `<div class="ftf-map-pin-label" style="background:#0c4a6e;color:#fff;border-color:#38bdf8;">${seg.toFixed(1)} m</div>`,
+          iconSize: [0, 0],
+        }),
+      }).addTo(wbMeasureLayer);
+    }
+    L.circleMarker(pt, { radius: 5, color: "#fff", weight: 2, fillColor: "#0284c7", fillOpacity: 1 }).addTo(wbMeasureLayer);
+  });
+  if (readout) {
+    readout.textContent = `Measured: ${running.toFixed(1)} m (${measurePoints.length} pts)`;
+  }
+  updatePinModeUi();
+}
+
+function setMeasureMode(on) {
+  measureModeActive = Boolean(on);
+  const btn = document.getElementById("btnMapMeasure");
+  if (btn) {
+    btn.classList.toggle("btn-accent", measureModeActive);
+    btn.classList.toggle("btn-outline", !measureModeActive);
+  }
+  if (measureModeActive) {
+    const sel = document.getElementById("pinTypeSelect");
+    if (sel) sel.value = "";
+  } else {
+    measurePoints = [];
+    renderMeasureOverlay();
+  }
+  updatePinModeUi();
 }
 
 document.getElementById("pinTypeSelect")?.addEventListener("change", updatePinModeUi);
-document.getElementById("btnExitPinMode")?.addEventListener("click", () => {
-  const sel = document.getElementById("pinTypeSelect");
-  if (sel) sel.value = "";
-  updatePinModeUi();
+document.getElementById("btnExitPinMode")?.addEventListener("click", exitMapInteractiveModes);
+document.getElementById("btnMapMeasure")?.addEventListener("click", () => setMeasureMode(!measureModeActive));
+document.getElementById("btnClearMeasure")?.addEventListener("click", () => {
+  measurePoints = [];
+  renderMeasureOverlay();
+});
+document.getElementById("btnMapFitLot")?.addEventListener("click", () => {
+  if (!wbMap) return;
+  if (wbParcelBounds) {
+    wbMap.fitBounds(wbParcelBounds.pad(0.25));
+  } else if ((assessment?.field_pins || []).length) {
+    const pts = assessment.field_pins.map(getPinLatLng).filter(Boolean);
+    if (pts.length) wbMap.fitBounds(L.latLngBounds(pts).pad(0.35));
+  } else {
+    showToast("Fetch Live NSW Cadastre first to zoom to the parcel.", "warn");
+  }
+});
+document.getElementById("btnMapExpand")?.addEventListener("click", () => {
+  const card = document.getElementById("mapStudioCard");
+  const btn = document.getElementById("btnMapExpand");
+  if (!card) return;
+  const expanded = card.classList.toggle("map-expanded");
+  if (btn) btn.textContent = expanded ? "✕ Collapse" : "⛶ Expand";
+  setTimeout(() => wbMap?.invalidateSize(), 80);
+});
+document.querySelectorAll("#mapBasemapBar .basemap-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setBasemap(btn.dataset.basemap));
+});
+
+function syncMapOverlayVisibility() {
+  if (!wbMap) return;
+  const toggleLayer = (chkId, layer) => {
+    if (!layer) return;
+    const on = document.getElementById(chkId)?.checked !== false;
+    if (on && !wbMap.hasLayer(layer)) wbMap.addLayer(layer);
+    if (!on && wbMap.hasLayer(layer)) wbMap.removeLayer(layer);
+  };
+  toggleLayer("chkLayerCadastre", wbCadastreLayer);
+  toggleLayer("chkLayerContours", wbContoursLayer);
+  toggleLayer("chkLayerWater", wbWaterLayer);
+  toggleLayer("chkLayerFootprints", wbFootprintsLayer);
+  renderMapPins();
+}
+
+["chkLayerCadastre", "chkLayerContours", "chkLayerWater", "chkLayerFootprints", "chkLayerLabels"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("change", syncMapOverlayVisibility);
 });
 
 document.getElementById("btnDropGpsPin")?.addEventListener("click", () => {
@@ -1095,7 +1356,7 @@ document.getElementById("btnDropGpsPin")?.addEventListener("click", () => {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       btn.disabled = false;
-      btn.textContent = "📍 Use My GPS";
+      btn.textContent = "📍 My GPS";
       const { latitude, longitude, accuracy } = pos.coords;
       const dropped = dropPinAtLatLng(ptype, latitude, longitude);
       if (wbMap) wbMap.setView([latitude, longitude], Math.max(wbMap.getZoom(), 18));
@@ -1103,7 +1364,7 @@ document.getElementById("btnDropGpsPin")?.addEventListener("click", () => {
     },
     (err) => {
       btn.disabled = false;
-      btn.textContent = "📍 Use My GPS";
+      btn.textContent = "📍 My GPS";
       showToast(`GPS error: ${err.message}`, "error");
     },
     { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
@@ -1112,87 +1373,353 @@ document.getElementById("btnDropGpsPin")?.addEventListener("click", () => {
 
 function initWbMap() {
   if (wbMap) return;
-  wbMap = L.map("wbMap").setView([-28.58, 153.18], 13);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    attribution: "Imagery &copy; Esri | Cadastre &copy; NSW Spatial Services",
-    maxZoom: 19,
-  }).addTo(wbMap);
-  wbGisLayer = L.layerGroup().addTo(wbMap);
+  wbMap = L.map("wbMap", { maxZoom: 20 }).setView([-28.58, 153.18], 13);
+  setBasemap(activeBasemap);
+  wbCadastreLayer = L.layerGroup().addTo(wbMap);
+  wbContoursLayer = L.layerGroup().addTo(wbMap);
+  wbWaterLayer = L.layerGroup().addTo(wbMap);
+  wbFootprintsLayer = L.layerGroup().addTo(wbMap);
   wbPinsLayer = L.layerGroup().addTo(wbMap);
+  wbMeasureLayer = L.layerGroup().addTo(wbMap);
+
+  L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(wbMap);
+
+  wbMap.on("mousemove", (ev) => {
+    const el = document.getElementById("mapCursorCoords");
+    if (!el) return;
+    const { lat, lng } = ev.latlng;
+    const [e, n] = wgs84ToMga56(lng, lat);
+    el.textContent = `GDA2020 MGA56: E ${Math.round(e)}  N ${Math.round(n)}  |  WGS84: ${lat.toFixed(5)}, ${lng.toFixed(5)}  (Z${wbMap.getZoom()})`;
+  });
+
+  wbMap.on("zoomend", () => {
+    renderMapPins();
+  });
 
   wbMap.on("click", (ev) => {
-    const ptype = document.getElementById("pinTypeSelect").value;
+    if (measureModeActive) {
+      measurePoints.push(ev.latlng);
+      renderMeasureOverlay();
+      return;
+    }
+    const ptype = document.getElementById("pinTypeSelect")?.value;
     if (!ptype) return;
     const { lat, lng } = ev.latlng;
     const dropped = dropPinAtLatLng(ptype, lat, lng);
-    showToast(`Recorded ${dropped.label} (MGA56 E${Math.round(dropped.easting)} N${Math.round(dropped.northing)})`, "info", 2200);
+    showToast(`Pinned ${dropped.label} (MGA56 E${Math.round(dropped.easting)} N${Math.round(dropped.northing)})`, "info", 2200);
+  });
+
+  renderPinPalette();
+}
+
+function getFootprintDimsForPin(pin) {
+  const ft = pin.feature_type;
+  let lM = pin.length_m ? Number(pin.length_m) : 0;
+  let wM = pin.width_m ? Number(pin.width_m) : 0;
+  if ((!lM || !wM) && lastModel) {
+    const tr = lastModel.trench_layout || {};
+    if (ft === "eta_bed" || ft === "reserve_laa") {
+      lM = Number(tr.trench_length_m || 0);
+      const nTr = Math.max(1, Number(tr.number_of_trenches || 1));
+      wM = nTr * Number(tr.trench_width_m || 2) + (nTr - 1) * Number(tr.trench_separation_m || 0);
+    } else if (ft === "reed_bed" && (lastModel.recommended_reed_bed_count || 0) > 0) {
+      const nRb = Math.max(1, Number(lastModel.recommended_reed_bed_count || 1));
+      const d = lastModel.recommended_reed_bed_dims || { length_m: 3.0, width_m: 1.9 };
+      lM = nRb * Number(d.length_m || 3.0) + (nRb - 1) * 0.5;
+      wM = Number(d.width_m || 1.9);
+    } else if (ft === "septic_tank") {
+      lM = 2.6;
+      wM = 1.6;
+    } else if (ft === "grease_arrestor") {
+      lM = 1.8;
+      wM = 1.2;
+    }
+  }
+  return lM > 0 && wM > 0 ? { lM, wM } : null;
+}
+
+function buildRotatedFootprintLatLngs(lat, lng, lM, wM, rotDeg = 0) {
+  const mPerDegLat = 111132;
+  const mPerDegLon = 111320 * Math.cos((lat * Math.PI) / 180);
+  const rad = (Number(rotDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const corners = [
+    [-lM / 2, -wM / 2],
+    [lM / 2, -wM / 2],
+    [lM / 2, wM / 2],
+    [-lM / 2, wM / 2],
+  ];
+  return corners.map(([dx, dy]) => {
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+    return [lat + ry / mPerDegLat, lng + rx / mPerDegLon];
   });
 }
 
+function buildPinEditorPopupHtml(pin, idx) {
+  const typeOpts = Object.entries(PIN_FEATURE_SPECS)
+    .map(([k, spec]) => `<option value="${k}" ${k === pin.feature_type ? "selected" : ""}>${escHtml(spec.label)}</option>`)
+    .join("");
+  const fp = getFootprintDimsForPin(pin);
+  return `
+    <div class="ftf-pin-popup" data-pin-popup-idx="${idx}">
+      <div style="display:flex; align-items:center; gap:7px; margin-bottom:4px;">
+        ${renderPinMarkerSvg(pin.feature_type, 24)}
+        <strong style="font-size:0.86rem;">Edit Map Pin</strong>
+      </div>
+      <label>Pin Label</label>
+      <input type="text" class="pp-label" value="${escHtml(pin.label)}" />
+      <label>Feature Type</label>
+      <select class="pp-type">${typeOpts}</select>
+      ${fp ? `<label>Footprint Orientation (${fp.lM.toFixed(1)} m × ${fp.wM.toFixed(1)} m · Rotation °)</label>
+      <input type="range" class="pp-rot" min="0" max="180" step="5" value="${Number(pin.rotation_deg || 0)}" />` : ""}
+      <div style="margin-top:6px; font-size:0.7rem; color:#64748b; font-family:monospace;">
+        MGA56: E ${Math.round(pin.easting_mga56 || 0)} · N ${Math.round(pin.northing_mga56 || 0)}<br/>
+        Lat/Lng: ${Number(pin.latitude || 0).toFixed(5)}, ${Number(pin.longitude || 0).toFixed(5)}
+      </div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button type="button" class="btn btn-primary btn-sm pp-save" style="flex:1;">Apply</button>
+        <button type="button" class="btn btn-outline btn-sm pp-dup" title="Duplicate pin nearby">Copy</button>
+        <button type="button" class="btn btn-danger-outline btn-sm pp-del">Delete</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderMapPins() {
-  if (!wbPinsLayer) return;
+  if (!wbPinsLayer || !wbMap) return;
   wbPinsLayer.clearLayers();
-  const pins = assessment.field_pins || [];
-  pins.forEach((p) => {
-    const lat = p.latitude != null ? p.latitude : (p.northing_mga56 && Math.abs(p.northing_mga56) <= 90 ? p.northing_mga56 : null);
-    const lng = p.longitude != null ? p.longitude : (p.easting_mga56 && Math.abs(p.easting_mga56) <= 180 ? p.easting_mga56 : null);
-    if (lat != null && lng != null) {
-      L.circleMarker([lat, lng], {
-        radius: 7, color: "#fff", weight: 2, fillColor: "#b45309", fillOpacity: 0.95,
-      }).bindTooltip(p.label, { permanent: true, direction: "top" }).addTo(wbPinsLayer);
+  if (wbFootprintsLayer) wbFootprintsLayer.clearLayers();
+  const pins = assessment?.field_pins || [];
+  const zoom = wbMap.getZoom();
+  const iconPx = zoom >= 18 ? 34 : zoom >= 16 ? 28 : 23;
+  const showLabels = document.getElementById("chkLayerLabels")?.checked !== false;
+  const markerMap = new Map();
+
+  pins.forEach((p, idx) => {
+    const ll = getPinLatLng(p);
+    if (!ll) return;
+    const [lat, lng] = ll;
+    const spec = PIN_FEATURE_SPECS[p.feature_type] || PIN_FEATURE_SPECS.custom;
+
+    // Scaled real-world design footprint polygon on map (when Footprints layer enabled)
+    if (wbFootprintsLayer) {
+      const fp = getFootprintDimsForPin(p);
+      if (fp) {
+        const polyPts = buildRotatedFootprintLatLngs(lat, lng, fp.lM, fp.wM, p.rotation_deg || 0);
+        L.polygon(polyPts, {
+          color: spec.color,
+          weight: 2,
+          dashArray: p.feature_type === "reserve_laa" ? "5,4" : undefined,
+          fillColor: spec.color,
+          fillOpacity: 0.22,
+          interactive: false,
+        }).addTo(wbFootprintsLayer);
+      }
     }
-  });
 
-  const etaPin = pins.find((p) => p.feature_type === "eta_bed");
-  let setbackBanner = "";
-  let measuredSetbacks = null;
-  if (etaPin && etaPin.easting_mga56 && etaPin.northing_mga56 && Math.abs(etaPin.northing_mga56) > 1000 && spatial) {
-    measuredSetbacks = computePinSetbacksMeters([etaPin.easting_mga56, etaPin.northing_mga56], spatial);
-    const parts = [];
-    if (measuredSetbacks.boundary_m != null) parts.push(`Boundary: <strong>${measuredSetbacks.boundary_m} m</strong>`);
-    if (measuredSetbacks.watercourse_m != null) parts.push(`Nearest Mapped Watercourse: <strong>${measuredSetbacks.watercourse_m} m</strong>`);
-    if (parts.length) {
-      setbackBanner = `<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span>Measured from LAA Pin (MGA56): ${parts.join(" · ")}</span>
-        <button type="button" id="btnApplyPinSetbacks" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.74rem;">Apply to Setback Fields</button>
-      </div>`;
-    }
-  }
+    const iconHtml = `
+      <div class="ftf-map-pin-wrap${showLabels ? "" : " hide-lbl"}">
+        ${renderPinMarkerSvg(p.feature_type, iconPx)}
+        <span class="ftf-map-pin-label" style="border-left:3px solid ${spec.color};">${escHtml(p.label)}</span>
+      </div>
+    `;
+    const marker = L.marker([lat, lng], {
+      draggable: true,
+      icon: L.divIcon({
+        className: "leaflet-custom-pin",
+        html: iconHtml,
+        iconSize: [iconPx, iconPx],
+        iconAnchor: [iconPx / 2, iconPx / 2],
+        popupAnchor: [0, -iconPx / 2 - 4],
+      }),
+    }).addTo(wbPinsLayer);
 
-  const listEl = document.getElementById("pinsList");
-  listEl.innerHTML = pins.length
-    ? `<div>Captured MGA56 Pins (${pins.length}): ` +
-      pins.map((p, idx) => `<span class="badge badge-info" style="margin:2px 4px 2px 0;" title="MGA56 E${p.easting_mga56 ?? "—"} N${p.northing_mga56 ?? "—"} (Local ${p.local_x_m ?? 0}m, ${p.local_y_m ?? 0}m)">${p.label} <button type="button" data-rm-pin="${idx}" style="border:none; background:none; color:inherit; cursor:pointer; font-weight:800; padding:0 0 0 3px;">✕</button></span>`).join("") +
-      `</div>${setbackBanner}`
-    : "Select a feature in 'Drop Pin' and tap the satellite imagery to record GDA2020 MGA56 coordinates for CAD & setback checks.";
+    marker.bindPopup(() => buildPinEditorPopupHtml(assessment.field_pins[idx], idx), { maxWidth: 270 });
+    marker.on("popupopen", (ev) => {
+      const root = ev.popup.getElement();
+      if (!root) return;
+      root.querySelector(".pp-save")?.addEventListener("click", () => {
+        const curPin = assessment.field_pins[idx];
+        if (!curPin) return;
+        const nextLbl = root.querySelector(".pp-label")?.value.trim();
+        const nextType = root.querySelector(".pp-type")?.value;
+        const nextRot = root.querySelector(".pp-rot")?.value;
+        if (nextLbl) curPin.label = nextLbl;
+        if (nextType) curPin.feature_type = nextType;
+        if (nextRot != null) curPin.rotation_deg = Number(nextRot);
+        marker.closePopup();
+        recomputePinLocalCoords();
+        renderMapPins();
+        syncStateFromForm();
+        showToast(`Updated pin "${curPin.label}".`, "pass", 2000);
+      });
+      root.querySelector(".pp-rot")?.addEventListener("input", (e) => {
+        const curPin = assessment.field_pins[idx];
+        if (!curPin) return;
+        curPin.rotation_deg = Number(e.target.value);
+        // Live-update footprint rotation without closing popup
+        if (wbFootprintsLayer) {
+          wbFootprintsLayer.clearLayers();
+          (assessment.field_pins || []).forEach((fpPin) => {
+            const fll = getPinLatLng(fpPin);
+            const fdims = getFootprintDimsForPin(fpPin);
+            const fspec = PIN_FEATURE_SPECS[fpPin.feature_type] || PIN_FEATURE_SPECS.custom;
+            if (fll && fdims) {
+              L.polygon(buildRotatedFootprintLatLngs(fll[0], fll[1], fdims.lM, fdims.wM, fpPin.rotation_deg || 0), {
+                color: fspec.color, weight: 2, dashArray: fpPin.feature_type === "reserve_laa" ? "5,4" : undefined, fillColor: fspec.color, fillOpacity: 0.22, interactive: false,
+              }).addTo(wbFootprintsLayer);
+            }
+          });
+        }
+      });
+      root.querySelector(".pp-dup")?.addEventListener("click", () => {
+        const curPin = assessment.field_pins[idx];
+        if (!curPin) return;
+        marker.closePopup();
+        dropPinAtLatLng(curPin.feature_type, Number(curPin.latitude) + 0.00009, Number(curPin.longitude) + 0.00009);
+        showToast(`Duplicated "${curPin.label}" nearby — drag to position.`, "info", 2400);
+      });
+      root.querySelector(".pp-del")?.addEventListener("click", () => {
+        const removed = assessment.field_pins.splice(idx, 1)[0];
+        marker.closePopup();
+        recomputePinLocalCoords();
+        renderMapPins();
+        syncStateFromForm();
+        showToast(`Removed pin "${removed?.label || "Pin"}".`, "warn", 2200);
+      });
+    });
 
-  listEl.querySelectorAll("[data-rm-pin]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      assessment.field_pins.splice(Number(btn.dataset.rmPin), 1);
+    marker.on("dragend", () => {
+      const pos = marker.getLatLng();
+      const [easting, northing] = wgs84ToMga56(pos.lng, pos.lat);
+      p.latitude = Number(pos.lat.toFixed(6));
+      p.longitude = Number(pos.lng.toFixed(6));
+      p.easting_mga56 = easting;
+      p.northing_mga56 = northing;
       recomputePinLocalCoords();
       renderMapPins();
       syncStateFromForm();
+      showToast(`Moved ${p.label} → MGA56 E${Math.round(easting)} N${Math.round(northing)}`, "info", 2000);
+    });
+
+    markerMap.set(idx, marker);
+  });
+
+  // Live MGA56 setback calculations (LAA -> Boundary, LAA -> Watercourse, Septic -> Dwelling)
+  const etaPin = pins.find((p) => p.feature_type === "eta_bed");
+  const septicPin = pins.find((p) => p.feature_type === "septic_tank");
+  const dwellingPin = pins.find((p) => p.feature_type === "dwelling");
+  let setbackBanner = "";
+  let measuredSetbacks = null;
+  let septicToDwellingM = null;
+  const parts = [];
+  if (etaPin && etaPin.easting_mga56 && etaPin.northing_mga56 && Math.abs(etaPin.northing_mga56) > 1000 && spatial) {
+    measuredSetbacks = computePinSetbacksMeters([etaPin.easting_mga56, etaPin.northing_mga56], spatial);
+    if (measuredSetbacks.boundary_m != null) parts.push(`LAA→Boundary: <strong>${measuredSetbacks.boundary_m} m</strong>`);
+    if (measuredSetbacks.watercourse_m != null) parts.push(`LAA→Watercourse: <strong>${measuredSetbacks.watercourse_m} m</strong>`);
+  }
+  if (septicPin?.easting_mga56 && dwellingPin?.easting_mga56) {
+    septicToDwellingM = Math.round(Math.hypot(septicPin.easting_mga56 - dwellingPin.easting_mga56, septicPin.northing_mga56 - dwellingPin.northing_mga56) * 10) / 10;
+    parts.push(`Septic→Dwelling: <strong>${septicToDwellingM} m</strong>`);
+  }
+  if (parts.length) {
+    setbackBanner = `<div style="margin-top:8px; padding:7px 10px; border-radius:8px; background:var(--forest-50); border:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+      <span>Measured Setbacks (MGA56): ${parts.join(" · ")}</span>
+      <button type="button" id="btnApplyPinSetbacks" class="btn btn-primary btn-sm" style="padding:3px 9px; font-size:0.74rem;">Apply to Setback Fields</button>
+    </div>`;
+  }
+
+  const listEl = document.getElementById("pinsList");
+  if (!listEl) return;
+  if (!pins.length) {
+    listEl.innerHTML = `Pick any feature icon above and click the map (or tap <strong>My GPS</strong>) to place scaled GDA2020 pins. Drag pins directly on the map to adjust.`;
+    return;
+  }
+
+  listEl.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <strong style="color:var(--heading);">Placed Site Pins (${pins.length}) — click to zoom/edit or drag on map:</strong>
+      <button type="button" id="btnClearAllPins" class="btn btn-danger-outline btn-sm" style="padding:2px 8px; font-size:0.72rem;">Clear All Pins</button>
+    </div>
+    <div class="pin-manager-list">
+      ${pins.map((p, idx) => `
+        <div class="pin-card">
+          <div class="pin-card-main" data-zoom-pin="${idx}" title="Click to pan &amp; open editor">
+            ${renderPinMarkerSvg(p.feature_type, 24)}
+            <div style="min-width:0;">
+              <div class="pin-card-title">${escHtml(p.label)}</div>
+              <div class="pin-card-coords">E ${Math.round(p.easting_mga56 || 0)} · N ${Math.round(p.northing_mga56 || 0)}</div>
+            </div>
+          </div>
+          <div class="pin-card-actions">
+            <button type="button" class="pin-icon-btn" data-edit-pin="${idx}" title="Rename, change type or rotate">✎</button>
+            <button type="button" class="pin-icon-btn danger" data-rm-pin="${idx}" title="Delete pin">✕</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    ${setbackBanner}
+  `;
+
+  listEl.querySelectorAll("[data-zoom-pin], [data-edit-pin]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const idx = Number(el.dataset.zoomPin ?? el.dataset.editPin);
+      const p = assessment.field_pins[idx];
+      const ll = p ? getPinLatLng(p) : null;
+      const m = markerMap.get(idx);
+      if (ll && wbMap) {
+        wbMap.setView(ll, Math.max(wbMap.getZoom(), 18), { animate: true });
+      }
+      if (m) m.openPopup();
     });
   });
 
+  listEl.querySelectorAll("[data-rm-pin]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const removed = assessment.field_pins.splice(Number(btn.dataset.rmPin), 1)[0];
+      recomputePinLocalCoords();
+      renderMapPins();
+      syncStateFromForm();
+      showToast(`Removed pin "${removed?.label || "Pin"}".`, "warn", 2000);
+    });
+  });
+
+  document.getElementById("btnClearAllPins")?.addEventListener("click", async () => {
+    const ok = await showConfirmDialog("Clear all map pins?", `Remove all ${pins.length} GDA2020 field pins from this project?`, "Clear All");
+    if (!ok) return;
+    assessment.field_pins = [];
+    renderMapPins();
+    syncStateFromForm();
+    showToast("Cleared all map pins.", "info", 2000);
+  });
+
   document.getElementById("btnApplyPinSetbacks")?.addEventListener("click", () => {
-    if (!measuredSetbacks) return;
-    if (measuredSetbacks.boundary_m != null) {
+    if (measuredSetbacks?.boundary_m != null) {
       document.getElementById("fDistBound").value = measuredSetbacks.boundary_m;
     }
-    if (measuredSetbacks.watercourse_m != null) {
+    if (measuredSetbacks?.watercourse_m != null) {
       document.getElementById("fDistWater").value = measuredSetbacks.watercourse_m;
     }
+    if (septicToDwellingM != null) {
+      document.getElementById("fDistSeptic").value = septicToDwellingM;
+    }
     syncStateFromForm();
+    showToast("Applied MGA56 pin setbacks to Site Evaluation form.", "pass", 2500);
   });
 }
 
 function renderSpatialOnMap() {
   initWbMap();
-  wbGisLayer.clearLayers();
+  wbCadastreLayer.clearLayers();
+  wbContoursLayer.clearLayers();
+  wbWaterLayer.clearLayers();
+  wbParcelBounds = null;
   const box = document.getElementById("gisOverlaysBox");
   if (!spatial || !spatial.fetched_live) {
     box.textContent = spatial?.warnings?.join(" ") || "No live NSW GIS overlay fetched yet.";
+    renderMapPins();
     return;
   }
 
@@ -1209,21 +1736,40 @@ function renderSpatialOnMap() {
   `;
 
   if (spatial.neighbour_parcels_geojson?.length) {
-    L.geoJSON(spatial.neighbour_parcels_geojson, { style: { color: "#cbd5e1", weight: 1, fillOpacity: 0.05 } }).addTo(wbGisLayer);
+    L.geoJSON(spatial.neighbour_parcels_geojson, {
+      style: { color: "#cbd5e1", weight: 1, fillOpacity: 0.04 },
+      interactive: false,
+    }).addTo(wbCadastreLayer);
+  }
+  if (spatial.contours_geojson?.length) {
+    L.geoJSON(spatial.contours_geojson, {
+      style: { color: "#e2e8f0", weight: 0.9, opacity: 0.6 },
+      interactive: false,
+    }).addTo(wbContoursLayer);
   }
   if (spatial.watercourses_geojson?.length) {
-    L.geoJSON(spatial.watercourses_geojson, { style: { color: "#38bdf8", weight: 2.2 } }).addTo(wbGisLayer);
+    // Soft buffer halo + crisp mapped watercourse polyline
+    L.geoJSON(spatial.watercourses_geojson, {
+      style: { color: "#38bdf8", weight: 14, opacity: 0.18, lineCap: "round" },
+      interactive: false,
+    }).addTo(wbWaterLayer);
+    L.geoJSON(spatial.watercourses_geojson, {
+      style: { color: "#0ea5e9", weight: 2.5, opacity: 0.95 },
+      interactive: false,
+    }).addTo(wbWaterLayer);
   }
   if (spatial.parcel_geojson) {
     const subj = L.geoJSON(spatial.parcel_geojson, {
-      style: { color: "#ef4444", weight: 2.6, fillColor: "#f87171", fillOpacity: 0.22 },
-    }).addTo(wbGisLayer);
+      style: { color: "#ef4444", weight: 2.6, fillColor: "#f87171", fillOpacity: 0.16 },
+      interactive: false,
+    }).addTo(wbCadastreLayer);
+    wbParcelBounds = subj.getBounds();
     setTimeout(() => {
       wbMap.invalidateSize();
-      wbMap.fitBounds(subj.getBounds().pad(0.25));
+      if (wbParcelBounds) wbMap.fitBounds(wbParcelBounds.pad(0.25));
     }, 80);
   }
-  renderMapPins();
+  syncMapOverlayVisibility();
   renderEmbeddedDrawingsPreview();
   renderSeeTriggerBanner();
   updateSidebarProgress();
@@ -1937,7 +2483,7 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
       laaPngBytes,
     ] = await Promise.all([
       rasterizeSvgToPngArrayBuffer(renderCadLayoutSvg(assessment, lastModel), "CAD Layout"),
-      rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION" }), "GIS Site Map"),
+      rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: lastModel }), "GIS Site Map"),
       rasterizeSvgToPngArrayBuffer(renderTreatmentTrainSvg(assessment, lastModel), "Treatment Train"),
       rasterizeSvgToPngArrayBuffer(renderSizingAndWaterBalanceSvg(assessment, lastModel), "Sizing & Water Balance Chart"),
       (assessment.boreholes || []).length ? rasterizeSvgToPngArrayBuffer(renderBoreholeProfileSvg(assessment, lastModel, lastAudit), "Borehole Soil Profile") : Promise.resolve(null),
@@ -2510,7 +3056,7 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
   try {
     logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)...`;
     const gisPngBytes = await rasterizeSvgToPngArrayBuffer(
-      renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" }),
+      renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel }),
       "SEE GIS Site Map",
     );
     const photosPayload = localPhotos.map((p) => ({
@@ -2606,7 +3152,13 @@ async function boot() {
 
   // Wire all live form fields across Shared Hub, Field, OSSM & SEE panels
   document.querySelectorAll(".ws-main input, .ws-main select, .ws-main textarea").forEach((el) => {
-    if (["aiFilesInput", "aiModelInput", "aiSessionKeyInput", "photoFileInput", "photoCaptionInput", "pinTypeSelect", "aiDraftInstructions", "seeAiInstructions"].includes(el.id)) return;
+    if ([
+      "aiFilesInput", "aiModelInput", "aiSessionKeyInput",
+      "photoFileInput", "photoCaptionInput", "pinTypeSelect",
+      "aiDraftInstructions", "seeAiInstructions",
+      "dashJobSearch", "dashJobStatusFilter",
+      "chkLayerCadastre", "chkLayerContours", "chkLayerWater", "chkLayerFootprints", "chkLayerLabels",
+    ].includes(el.id)) return;
     el.addEventListener("input", syncStateFromForm);
     el.addEventListener("change", syncStateFromForm);
   });

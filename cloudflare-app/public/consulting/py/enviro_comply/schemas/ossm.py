@@ -176,13 +176,16 @@ class FieldPin(BaseModel):
     feature_type: Literal[
         "dwelling",
         "septic_tank",
+        "grease_arrestor",
         "reed_bed",
+        "pump_well",
         "eta_bed",
         "reserve_laa",
         "borehole",
         "tree",
         "water_tank",
         "swale",
+        "custom",
     ]
     # Local metres relative to dwelling centre (0,0) OR real GDA2020 MGA56 coordinates
     local_x_m: float = 0.0

@@ -18,6 +18,7 @@ const { loadLismoreDatasets, runLismoreModelJS, auditLismoreComplianceJS, render
   "../public/consulting/app/lismore-engine.js"
 );
 const {
+  PIN_FEATURE_SPECS,
   renderBoreholeProfileSvg,
   renderTreatmentTrainSvg,
   renderSepticCrossSectionSvg,
@@ -27,6 +28,7 @@ const {
   renderSizingAndWaterBalanceSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
+  renderPinMarkerSvg,
 } = await import("../public/consulting/app/diagrams.js");
 
 const { rules, climate } = await loadLismoreDatasets();
@@ -165,8 +167,12 @@ const gisSvg = renderGisSiteMapSvg(
   {
     ...sc,
     field_pins: [
-      { label: "DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
-      { label: "ETA BED", feature_type: "eta_bed", latitude: -28.5818, longitude: 153.2015 },
+      { label: "MAIN DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
+      { label: "SEPTIC TANK", feature_type: "septic_tank", latitude: -28.58125, longitude: 153.20128 },
+      { label: "REED BED", feature_type: "reed_bed", latitude: -28.5813, longitude: 153.20135 },
+      { label: "ETA BED / LAA", feature_type: "eta_bed", latitude: -28.58136, longitude: 153.20142, rotation_deg: 25 },
+      { label: "RESERVE LAA", feature_type: "reserve_laa", latitude: -28.58145, longitude: 153.20148 },
+      { label: "BH1", feature_type: "borehole", latitude: -28.58138, longitude: 153.20138 },
     ],
   },
   {
@@ -193,9 +199,32 @@ const gisSvg = renderGisSiteMapSvg(
       },
     ],
   },
+  { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: scRes },
 );
 assert.ok(gisSvg.includes("OSSM-GIS-01") && gisSvg.includes("DP100000"), "GIS Site Map SVG missing title block / Lot DP");
-assert.ok(gisSvg.includes("GPS Field Pins (2)") && gisSvg.includes("ROUS WATER"), "GIS Site Map SVG should plot dropped pins and active overlays");
+assert.ok(gisSvg.includes("GPS Field Pins (6)") && gisSvg.includes("ROUS WATER"), "GIS Site Map SVG should plot all 6 clustered pins and active overlays");
+assert.ok(gisSvg.includes("MAIN DWELLING") && gisSvg.includes("SEPTIC TANK") && gisSvg.includes("REED BED"), "GIS Site Map SVG should render custom callout pills");
+// Verify all custom SVG pin marker symbols are strict valid SVG
+for (const ft of Object.keys(PIN_FEATURE_SPECS)) {
+  const mSvg = renderPinMarkerSvg(ft, 28);
+  assert.ok(mSvg.startsWith("<svg") && mSvg.endsWith("</svg>"), `Pin marker SVG invalid for ${ft}`);
+  assert.ok(!/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.test(mSvg), `Unescaped '&' in pin SVG for ${ft}`);
+}
+// Verify zero overlapping callout pill rectangles on clustered GIS pins
+const labelRects = [...gisSvg.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)" height="16\.0" rx="3\.5"/g)].map((m) => ({
+  x1: Number(m[1]),
+  y1: Number(m[2]),
+  x2: Number(m[1]) + Number(m[3]),
+  y2: Number(m[2]) + 16,
+}));
+assert.equal(labelRects.length, 6, "Expected 6 placed callout pill rects for 6 clustered pins");
+for (let i = 0; i < labelRects.length; i++) {
+  for (let j = i + 1; j < labelRects.length; j++) {
+    const a = labelRects[i], b = labelRects[j];
+    const overlap = !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
+    assert.equal(overlap, false, `Callout pills ${i} and ${j} overlapped on clustered GIS map`);
+  }
+}
 const seeGisSvg = renderGisSiteMapSvg(sc, { fetched_live: true, parcel_geojson: { type: "Feature", geometry: { type: "Polygon", coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]] } } }, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" });
 assert.ok(seeGisSvg.includes("SEE-GIS-01") && seeGisSvg.includes("DA SUBMISSION"), "SEE GIS SVG should use SEE-GIS-01 title block");
 
