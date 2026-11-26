@@ -40,17 +40,22 @@
 	],
 	"vars": {
 		"BRAND_NAME": "Field To Forest",
-		"SITE_URL": "https://fieldtoforestfarm.com",
+		"SITE_URL": "https://fieldtoforestfarm.com.au",
 		"BASE_PATH": "/consulting",
 		"DEFAULT_LGA": "Lismore City Council",
 		"GEMINI_MODEL": "gemini-4-hydrogen"
 	},
-	// Uncomment after creating your D1 database ID and connecting your Cloudflare zone:
+	// Isolated Consultant Studio, APIs & Pyodide Engine routes on fieldtoforestfarm.com.au.
+	// Public SEO hub (/consulting) and consulting articles (/consulting/<slug>) are served by the unified fieldtoforest-site Worker.
 	"workers_dev": false,
 	"routes": [
-		{
-			"pattern": "fieldtoforestfarm.com/consulting*",
-			"zone_name": "fieldtoforestfarm.com"
-		}
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/app*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/api/*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/py/*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/admin-login*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/styles/*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/data/*", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/manifest.webmanifest", "zone_name": "fieldtoforestfarm.com.au" },
+		{ "pattern": "fieldtoforestfarm.com.au/consulting/sw.js", "zone_name": "fieldtoforestfarm.com.au" }
 	]
 }
