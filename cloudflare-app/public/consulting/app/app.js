@@ -1701,9 +1701,9 @@ function renderMapPins() {
   if (wbFootprintsLayer) wbFootprintsLayer.clearLayers();
   const pins = assessment?.field_pins || [];
   const zoom = wbMap.getZoom();
-  // Compact precision markers; auto-hide label pills when zoomed out (< 17) to prevent pile-ups on large rural lots (hover still shows label)
+  // Compact precision markers; labels show on hover only by default (unless user checks 'Labels')
   const iconPx = zoom >= 19 ? 20 : zoom >= 17 ? 17 : 14;
-  const showLabels = document.getElementById("chkLayerLabels")?.checked !== false && zoom >= 17;
+  const showLabels = Boolean(document.getElementById("chkLayerLabels")?.checked);
   const markerMap = new Map();
 
   pins.forEach((p, idx) => {
