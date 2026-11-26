@@ -17,7 +17,11 @@ function esc(s) {
  * Used identically by both the interactive Leaflet Map Studio AND the exported GIS Site Location Map (OSSM-GIS-01 / SEE-GIS-01).
  */
 export const PIN_FEATURE_SPECS = {
-  dwelling: { label: "Dwelling / Building", shortLabel: "DWELLING", color: "#0f172a", bg: "#e2e8f0" },
+  dwelling: { label: "Primary Dwelling", shortLabel: "DWELLING", color: "#0f172a", bg: "#e2e8f0" },
+  secondary_dwelling: { label: "Secondary Dwelling", shortLabel: "2ND DWELLING", color: "#334155", bg: "#e2e8f0" },
+  tourist_cabin: { label: "Tourist / Eco Cabin", shortLabel: "CABIN", color: "#047857", bg: "#d1fae5" },
+  farm_shed: { label: "Farm Shed / Barn", shortLabel: "FARM SHED", color: "#78350f", bg: "#fef3c7" },
+  commercial_kitchen: { label: "Commercial / Food Shed", shortLabel: "FOOD SHED", color: "#be123c", bg: "#ffe4e6" },
   septic_tank: { label: "Septic Tank", shortLabel: "SEPTIC TANK", color: "#9a3412", bg: "#ffedd5" },
   grease_arrestor: { label: "Grease Arrestor", shortLabel: "GREASE TRAP", color: "#b45309", bg: "#fef3c7" },
   reed_bed: { label: "Reed Bed", shortLabel: "REED BED", color: "#15803d", bg: "#dcfce7" },
@@ -46,6 +50,46 @@ export function renderPinGlyphInner(featureType) {
         <rect x="-1.6" y="1.4" width="3.2" height="4.6" fill="${col}" />
         <rect x="-4.4" y="0.3" width="2" height="2" fill="${col}" />
         <rect x="2.4" y="0.3" width="2" height="2" fill="${col}" />
+      `;
+    case "secondary_dwelling":
+      // Compact granny-flat / studio cottage with skillion/gable roof + side porch
+      return `
+        <circle cx="0" cy="0" r="12.5" fill="${col}" stroke="#ffffff" stroke-width="2" />
+        <polygon points="-1.2,-6.8 -7.4,-1.4 5.0,-1.4" fill="#ffffff" />
+        <rect x="-5.8" y="-1.6" width="9.2" height="7.2" rx="0.6" fill="#ffffff" />
+        <rect x="3.2" y="0.6" width="3.8" height="5.0" fill="#cbd5e1" />
+        <line x1="3.0" y1="0.6" x2="7.5" y2="0.6" stroke="#ffffff" stroke-width="1.3" />
+        <rect x="-2.6" y="1.6" width="2.6" height="4.0" fill="${col}" />
+        <rect x="-4.8" y="0.2" width="1.7" height="1.7" fill="${col}" />
+      `;
+    case "tourist_cabin":
+      // Distinct A-frame eco-cabin with pitched triangular roof & glazed front
+      return `
+        <circle cx="0" cy="0" r="12.5" fill="${col}" stroke="#ffffff" stroke-width="2" />
+        <polygon points="0,-8.0 -7.6,5.8 7.6,5.8" fill="#ffffff" />
+        <polygon points="0,-3.2 -3.2,5.8 3.2,5.8" fill="${col}" />
+        <line x1="-8.2" y1="5.8" x2="8.2" y2="5.8" stroke="#a7f3d0" stroke-width="1.5" stroke-linecap="round" />
+        <circle cx="0" cy="-4.6" r="1.2" fill="#fde68a" />
+      `;
+    case "farm_shed":
+      // Wide rural barn / machinery shed with pitched gable roof & wide roller-door
+      return `
+        <circle cx="0" cy="0" r="12.5" fill="${col}" stroke="#ffffff" stroke-width="2" />
+        <polygon points="0,-7.0 -8.2,-2.2 -8.2,5.8 8.2,5.8 8.2,-2.2" fill="#ffffff" />
+        <rect x="-4.8" y="-0.6" width="9.6" height="6.4" rx="0.5" fill="${col}" />
+        <line x1="-4.2" y1="1.2" x2="4.2" y2="1.2" stroke="#fde68a" stroke-width="0.9" />
+        <line x1="-4.2" y1="3.0" x2="4.2" y2="3.0" stroke="#fde68a" stroke-width="0.9" />
+        <line x1="-4.2" y1="4.8" x2="4.2" y2="4.8" stroke="#fde68a" stroke-width="0.9" />
+      `;
+    case "commercial_kitchen":
+      // Farm-gate / commercial food processing building with striped awning & roof vent
+      return `
+        <circle cx="0" cy="0" r="12.5" fill="${col}" stroke="#ffffff" stroke-width="2" />
+        <rect x="2.6" y="-7.4" width="2.4" height="3.6" fill="#fecdd3" />
+        <rect x="-7.4" y="-4.2" width="14.8" height="3.2" rx="0.8" fill="#fde68a" />
+        <rect x="-6.4" y="-1.0" width="12.8" height="6.8" rx="0.6" fill="#ffffff" />
+        <rect x="-4.4" y="0.8" width="4.4" height="3.2" fill="${col}" />
+        <rect x="1.6" y="0.8" width="2.8" height="5.0" fill="${col}" />
       `;
     case "septic_tank":
       return `
@@ -1264,17 +1308,20 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
   const barM = [5, 10, 20, 25, 50, 100, 200].reduce((a, b) => (Math.abs(b - targetBarM) < Math.abs(a - targetBarM) ? b : a));
   const barPx = barM * scale;
 
-  // Dedicated Right-Hand Legend Panel (Zero overlap with any pin!)
+  // Dedicated Right-Hand Legend Panel (Zero overlap with any pin; dynamically scales row height if many types exist)
+  const legRowStep = typeCounts.size > 9 ? Math.max(15, Math.floor(225 / typeCounts.size)) : 22;
+  const legSymScale = legRowStep < 19 ? 0.50 : 0.60;
+  const legFontSize = legRowStep < 19 ? 7.9 : 8.5;
   let legRowsSvg = "";
-  let curY = legY + 34;
+  let curY = legY + 33;
   for (const [ft, count] of typeCounts.entries()) {
     const spec = PIN_FEATURE_SPECS[ft] || PIN_FEATURE_SPECS.custom;
     const countTxt = count > 1 ? ` (×${count})` : "";
     legRowsSvg += `
-      <g transform="translate(${legX + 20}, ${curY}) scale(0.62)">${renderPinGlyphInner(ft)}</g>
-      <text x="${legX + 36}" y="${curY + 3.5}" font-size="8.6" font-weight="700" fill="#0f172a">${esc(spec.label)}${countTxt}</text>
+      <g transform="translate(${legX + 19}, ${curY}) scale(${legSymScale.toFixed(2)})">${renderPinGlyphInner(ft)}</g>
+      <text x="${legX + 34}" y="${curY + 3.2}" font-size="${legFontSize}" font-weight="700" fill="#0f172a">${esc(spec.label)}${countTxt}</text>
     `;
-    curY += 24;
+    curY += legRowStep;
   }
 
   const ctxStartY = Math.max(curY + 8, legY + legH - 134);

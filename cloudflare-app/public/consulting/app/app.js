@@ -1245,13 +1245,17 @@ const MAP_BASEMAPS = {
 const PALETTE_TYPES = [
   { type: "", label: "Pan / Drag" },
   { type: "dwelling", label: "Dwelling" },
+  { type: "secondary_dwelling", label: "2nd Dwelling" },
+  { type: "tourist_cabin", label: "Tourist Cabin" },
+  { type: "farm_shed", label: "Farm Shed" },
+  { type: "commercial_kitchen", label: "Food Shed" },
   { type: "septic_tank", label: "Septic" },
+  { type: "grease_arrestor", label: "Grease Trap" },
   { type: "reed_bed", label: "Reed Bed" },
+  { type: "pump_well", label: "Pump Well" },
   { type: "eta_bed", label: "ETA / LAA" },
   { type: "reserve_laa", label: "Reserve" },
   { type: "borehole", label: "Borehole" },
-  { type: "grease_arrestor", label: "Grease Trap" },
-  { type: "pump_well", label: "Pump Well" },
   { type: "water_tank", label: "Water Tank" },
   { type: "swale", label: "Swale" },
   { type: "custom", label: "Custom" },
@@ -1286,7 +1290,8 @@ function recomputePinLocalCoords() {
     }
     return null;
   };
-  const dwPin = pins.find((p) => p.feature_type === "dwelling");
+  const BUILDING_TYPES = new Set(["dwelling", "secondary_dwelling", "tourist_cabin", "farm_shed", "commercial_kitchen"]);
+  const dwPin = pins.find((p) => p.feature_type === "dwelling") || pins.find((p) => BUILDING_TYPES.has(p.feature_type));
   let origin = dwPin ? resolveMga(dwPin) : null;
   if (!origin && spatial?.centroid_easting_mga56 && spatial?.centroid_northing_mga56) {
     origin = [Number(spatial.centroid_easting_mga56), Number(spatial.centroid_northing_mga56)];
@@ -1673,7 +1678,8 @@ function renderMapPins() {
   if (wbFootprintsLayer) wbFootprintsLayer.clearLayers();
   const pins = assessment?.field_pins || [];
   const zoom = wbMap.getZoom();
-  const iconPx = zoom >= 18 ? 34 : zoom >= 16 ? 28 : 23;
+  // Compact precision markers on the interactive map so exact roofs/fixtures remain visible when placing pins
+  const iconPx = zoom >= 19 ? 20 : zoom >= 17 ? 17 : 14;
   const showLabels = document.getElementById("chkLayerLabels")?.checked !== false;
   const markerMap = new Map();
 
@@ -1790,7 +1796,9 @@ function renderMapPins() {
   // Live MGA56 setback calculations (LAA -> Boundary, LAA -> Watercourse, Septic -> Dwelling)
   const etaPin = pins.find((p) => p.feature_type === "eta_bed");
   const septicPin = pins.find((p) => p.feature_type === "septic_tank");
-  const dwellingPin = pins.find((p) => p.feature_type === "dwelling");
+  const dwellingPin =
+    pins.find((p) => p.feature_type === "dwelling") ||
+    pins.find((p) => ["secondary_dwelling", "tourist_cabin", "farm_shed", "commercial_kitchen"].includes(p.feature_type));
   let setbackBanner = "";
   let measuredSetbacks = null;
   let septicToDwellingM = null;

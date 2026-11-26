@@ -175,6 +175,10 @@ class FieldPin(BaseModel):
     label: str
     feature_type: Literal[
         "dwelling",
+        "secondary_dwelling",
+        "tourist_cabin",
+        "farm_shed",
+        "commercial_kitchen",
         "septic_tank",
         "grease_arrestor",
         "reed_bed",

@@ -169,6 +169,9 @@ const pinnedSample = {
   ...sc,
   field_pins: [
     { label: "MAIN DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
+    { label: "2ND DWELLING", feature_type: "secondary_dwelling", latitude: -28.58115, longitude: 153.20112 },
+    { label: "ECO CABIN 1", feature_type: "tourist_cabin", latitude: -28.5811, longitude: 153.20125 },
+    { label: "FARM SHED", feature_type: "farm_shed", latitude: -28.58118, longitude: 153.20105 },
     { label: "SEPTIC TANK", feature_type: "septic_tank", latitude: -28.58125, longitude: 153.20128 },
     { label: "REED BED", feature_type: "reed_bed", latitude: -28.5813, longitude: 153.20135 },
     { label: "ETA BED / LAA", feature_type: "eta_bed", latitude: -28.58136, longitude: 153.20142, rotation_deg: 25 },
@@ -209,16 +212,24 @@ assert.ok(!gisSvg.includes("MAIN DWELLING"), "Whole-lot GIS map should NOT clutt
 
 // Map 2: Zoomed Exact-GPS Pin & Infrastructure Plan (Vector & Aerial Backdrop modes, zero text labels, dedicated side legend)
 const vp = computePinMapViewport(pinnedSample, sampleSpatial);
-assert.ok(vp && vp.pins.length === 6 && vp.targetWM >= 58, "Zoomed pin viewport should frame all 6 pins tightly");
+assert.ok(vp && vp.pins.length === 9 && vp.targetWM >= 58, "Zoomed pin viewport should frame all 9 pins tightly");
 const pinDetailVectorSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {
   drawingCode: "OSSM-GIS-02",
   submissionLabel: "S68 SUBMISSION",
   model: scRes,
   backdropMode: "vector",
 });
-assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (6 PINS)"), "Zoomed Pin Map missing title/legend");
+assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (9 PINS)"), "Zoomed Pin Map missing title/legend");
 assert.ok(!pinDetailVectorSvg.includes("MAIN DWELLING"), "Zoomed Pin Map must NOT place floating text labels on pins");
-assert.ok(pinDetailVectorSvg.includes("Dwelling / Building") && pinDetailVectorSvg.includes("Septic Tank") && pinDetailVectorSvg.includes("Reed Bed"), "Zoomed Pin Map legend must identify every feature type");
+assert.ok(
+  pinDetailVectorSvg.includes("Primary Dwelling") &&
+    pinDetailVectorSvg.includes("Secondary Dwelling") &&
+    pinDetailVectorSvg.includes("Tourist / Eco Cabin") &&
+    pinDetailVectorSvg.includes("Farm Shed / Barn") &&
+    pinDetailVectorSvg.includes("Septic Tank") &&
+    pinDetailVectorSvg.includes("Reed Bed"),
+  "Zoomed Pin Map legend must identify every building & wastewater feature type",
+);
 
 const pinDetailAerialSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {
   drawingCode: "OSSM-GIS-02",
