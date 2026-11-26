@@ -216,22 +216,26 @@ function compactSpatialForD1(spatial: unknown): string | null {
   if (!spatial || typeof spatial !== "object") return null;
   const s = { ...(spatial as Record<string, unknown>) };
   if (s.parcel_geojson && typeof s.parcel_geojson === "object") {
-    s.parcel_geojson = thinFeatures([s.parcel_geojson], 1, 80)[0];
+    s.parcel_geojson = thinFeatures([s.parcel_geojson], 1, 100)[0];
   }
-  s.neighbour_parcels_geojson = thinFeatures(s.neighbour_parcels_geojson, 18, 25);
-  s.watercourses_geojson = thinFeatures(s.watercourses_geojson, 25, 30);
-  s.contours_geojson = thinFeatures(s.contours_geojson, 25, 25);
+  s.neighbour_parcels_geojson = thinFeatures(s.neighbour_parcels_geojson, 25, 36);
+  s.watercourses_geojson = thinFeatures(s.watercourses_geojson, 45, 70);
+  s.contours_geojson = thinFeatures(s.contours_geojson, 100, 70);
 
   let json = JSON.stringify(s);
-  if (json.length > 75_000) {
+  if (json.length > 180_000) {
+    s.contours_geojson = thinFeatures(s.contours_geojson, 55, 45);
+    json = JSON.stringify(s);
+  }
+  if (json.length > 180_000) {
     s.contours_geojson = [];
     json = JSON.stringify(s);
   }
-  if (json.length > 75_000) {
+  if (json.length > 180_000) {
     s.neighbour_parcels_geojson = [];
     json = JSON.stringify(s);
   }
-  if (json.length > 75_000) {
+  if (json.length > 180_000) {
     s.watercourses_geojson = [];
     json = JSON.stringify(s);
   }

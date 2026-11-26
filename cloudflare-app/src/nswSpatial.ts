@@ -251,15 +251,198 @@ async function fetchJson(url: string, params: Record<string, string>): Promise<R
   return (await resp.json()) as Record<string, unknown>;
 }
 
+function roundCoord(p: number[]): number[] {
+  return [Math.round(p[0] * 1e6) / 1e6, Math.round(p[1] * 1e6) / 1e6];
+}
+
+/** Ramer-Douglas-Peucker polyline simplification (preserves true topographic bends & curves). */
+function rdpSimplify(pts: number[][], eps: number): number[][] {
+  if (pts.length <= 2) return pts.map(roundCoord);
+  const keep = new Uint8Array(pts.length);
+  keep[0] = 1;
+  keep[pts.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, pts.length - 1]];
+  const epsSq = eps * eps;
+
+  while (stack.length) {
+    const [start, end] = stack.pop()!;
+    const ax = pts[start][0], ay = pts[start][1];
+    const bx = pts[end][0], by = pts[end][1];
+    const dx = bx - ax, dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    let maxDistSq = -1;
+    let maxIdx = -1;
+
+    for (let i = start + 1; i < end; i++) {
+      const px = pts[i][0], py = pts[i][1];
+      let dSq: number;
+      if (lenSq <= 1e-18) {
+        dSq = (px - ax) * (px - ax) + (py - ay) * (py - ay);
+      } else {
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+        const cx = ax + t * dx;
+        const cy = ay + t * dy;
+        dSq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+      }
+      if (dSq > maxDistSq) {
+        maxDistSq = dSq;
+        maxIdx = i;
+      }
+    }
+
+    if (maxDistSq > epsSq && maxIdx > start && maxIdx < end) {
+      keep[maxIdx] = 1;
+      stack.push([start, maxIdx], [maxIdx, end]);
+    }
+  }
+
+  const out: number[][] = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (keep[i]) out.push(roundCoord(pts[i]));
+  }
+  return out;
+}
+
+/** Exact Cohen-Sutherland segment clipper against WGS84 bounding envelope. */
+function clipSegmentToBbox(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  xmin: number,
+  ymin: number,
+  xmax: number,
+  ymax: number,
+): [number, number, number, number] | null {
+  const code = (x: number, y: number) =>
+    (x < xmin ? 1 : x > xmax ? 2 : 0) | (y < ymin ? 4 : y > ymax ? 8 : 0);
+  let c0 = code(x0, y0);
+  let c1 = code(x1, y1);
+  while (true) {
+    if ((c0 | c1) === 0) return [x0, y0, x1, y1];
+    if ((c0 & c1) !== 0) return null;
+    const out = c0 !== 0 ? c0 : c1;
+    let x = 0, y = 0;
+    if (out & 8) {
+      x = x0 + ((x1 - x0) * (ymax - y0)) / (y1 - y0 || 1e-12);
+      y = ymax;
+    } else if (out & 4) {
+      x = x0 + ((x1 - x0) * (ymin - y0)) / (y1 - y0 || 1e-12);
+      y = ymin;
+    } else if (out & 2) {
+      y = y0 + ((y1 - y0) * (xmax - x0)) / (x1 - x0 || 1e-12);
+      x = xmax;
+    } else {
+      y = y0 + ((y1 - y0) * (xmin - x0)) / (x1 - x0 || 1e-12);
+      x = xmin;
+    }
+    if (out === c0) {
+      x0 = x; y0 = y; c0 = code(x0, y0);
+    } else {
+      x1 = x; y1 = y; c1 = code(x1, y1);
+    }
+  }
+}
+
+/** Clip a polyline to a bounding box, returning clean contiguous sub-polylines inside the box. */
+function clipPolylineToBbox(
+  pts: number[][],
+  xmin: number,
+  ymin: number,
+  xmax: number,
+  ymax: number,
+): number[][][] {
+  const out: number[][][] = [];
+  let current: number[][] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const seg = clipSegmentToBbox(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], xmin, ymin, xmax, ymax);
+    if (!seg) {
+      if (current.length >= 2) out.push(current);
+      current = [];
+      continue;
+    }
+    const [ax, ay, bx, by] = seg;
+    if (
+      current.length > 0 &&
+      Math.abs(current[current.length - 1][0] - ax) < 1e-7 &&
+      Math.abs(current[current.length - 1][1] - ay) < 1e-7
+    ) {
+      current.push([bx, by]);
+    } else {
+      if (current.length >= 2) out.push(current);
+      current = [[ax, ay], [bx, by]];
+    }
+  }
+  if (current.length >= 2) out.push(current);
+  return out;
+}
+
+/** Clip LineString/MultiLineString GeoJSON features to local bbox BEFORE simplifying so long NSW contours stay sub-metre accurate! */
+function clipAndCompactLineFeatures(
+  feats: GeoJsonFeature[],
+  clipBox: [number, number, number, number],
+  centerLon: number,
+  centerLat: number,
+  maxFeatures: number,
+  epsDeg: number,
+): GeoJsonFeature[] {
+  const [xmin, ymin, xmax, ymax] = clipBox;
+  const candidates: Array<{ distSq: number; feat: GeoJsonFeature }> = [];
+
+  for (const f of feats) {
+    const lines = extractLineStrings(f.geometry);
+    const clippedSegments: number[][][] = [];
+    for (const line of lines) {
+      const subs = clipPolylineToBbox(line, xmin, ymin, xmax, ymax);
+      for (const sub of subs) {
+        const simp = rdpSimplify(sub, epsDeg);
+        if (simp.length >= 2) clippedSegments.push(simp);
+      }
+    }
+    if (!clippedSegments.length) continue;
+
+    // Prioritize features closest to the subject parcel center if total exceeds maxFeatures
+    let minD2 = Infinity;
+    for (const seg of clippedSegments) {
+      for (const [x, y] of seg) {
+        const d2 = (x - centerLon) * (x - centerLon) + (y - centerLat) * (y - centerLat);
+        if (d2 < minD2) minD2 = d2;
+      }
+    }
+    candidates.push({
+      distSq: minD2,
+      feat: {
+        type: "Feature",
+        properties: f.properties ?? {},
+        geometry:
+          clippedSegments.length === 1
+            ? { type: "LineString", coordinates: clippedSegments[0] }
+            : { type: "MultiLineString", coordinates: clippedSegments },
+      },
+    });
+  }
+
+  candidates.sort((a, b) => a.distSq - b.distSq);
+  return candidates.slice(0, maxFeatures).map((c) => c.feat);
+}
+
 function simplifyLine(pts: number[][], maxPts: number): number[][] {
   if (pts.length <= maxPts) {
-    return pts.map((p) => [Math.round(p[0] * 1e6) / 1e6, Math.round(p[1] * 1e6) / 1e6]);
+    return pts.map(roundCoord);
   }
+  // Adaptive Douglas-Peucker fallback if polygon ring exceeds maxPts
+  let eps = 0.000005;
+  let simplified = rdpSimplify(pts, eps);
+  while (simplified.length > maxPts && eps < 0.01) {
+    eps *= 1.8;
+    simplified = rdpSimplify(pts, eps);
+  }
+  if (simplified.length <= maxPts) return simplified;
   const step = (pts.length - 1) / (maxPts - 1);
   const out: number[][] = [];
   for (let i = 0; i < maxPts; i++) {
     const p = pts[Math.min(pts.length - 1, Math.round(i * step))];
-    out.push([Math.round(p[0] * 1e6) / 1e6, Math.round(p[1] * 1e6) / 1e6]);
+    out.push(roundCoord(p));
   }
   return out;
 }
@@ -489,15 +672,23 @@ export async function runNswSpatialPrecheck(
     queryOverlayAttrsForParcel(BUSHFIRE_LAYER, parcelEsriPoly, bbox),
   ]);
 
+  const clipBox: [number, number, number, number] = [
+    bbox[0] - pad * 1.15,
+    bbox[1] - pad * 1.15,
+    bbox[2] + pad * 1.15,
+    bbox[3] + pad * 1.15,
+  ];
+
   if (neighboursRes.status === "fulfilled") {
     result.neighbour_parcels_geojson = compactFeatures(
       neighboursRes.value.filter((f) => f.properties?.lotidstring !== lotId),
       25,
-      30,
+      36,
     );
   }
   if (waterRes.status === "fulfilled") {
-    result.watercourses_geojson = compactFeatures(waterRes.value, 40, 35);
+    // Clip long watercourses to local bbox BEFORE Douglas-Peucker (~1.0 m accuracy)
+    result.watercourses_geojson = clipAndCompactLineFeatures(waterRes.value, clipBox, lon, lat, 55, 0.000009);
     // Exact MGA56 point-in-polygon + segment distance between parcel boundary and mapped watercourses
     const parcelMgaRings = extractOuterRings(parcel.geometry).map((ring) =>
       simplifyLine(ring, 80).map(([x, y]) => wgs84ToMga56(x, y)),
@@ -517,7 +708,8 @@ export async function runNswSpatialPrecheck(
     }
   }
   if (contoursRes.status === "fulfilled") {
-    result.contours_geojson = compactFeatures(contoursRes.value, 35, 30);
+    // Clip multi-kilometre NSW contour lines to local parcel bbox BEFORE ~1.2 m Douglas-Peucker simplification
+    result.contours_geojson = clipAndCompactLineFeatures(contoursRes.value, clipBox, lon, lat, 120, 0.000011);
   }
   if (zoningRes.status === "fulfilled") {
     result.land_zoning = uniqueLabels(zoningRes.value, ["SYM_CODE", "LAY_CLASS"]);

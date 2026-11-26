@@ -1002,11 +1002,29 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     }
   }
 
-  // Contours
+  // Contours (index contours every 50 m drawn bolder + subtle elevation labels)
   let contSvg = "";
+  const placedElevPts = [];
   for (const cf of spatial.contours_geojson || []) {
     const lines = coordsOf(cf.geometry);
-    if (lines.length) contSvg += `<path d="${linePath(lines)}" fill="none" stroke="#cbd5e1" stroke-width="0.7" />`;
+    if (!lines.length) continue;
+    const elev = Number(cf.properties?.elevation);
+    const isIndex = Number.isFinite(elev) && elev % 50 === 0;
+    contSvg += `<path d="${linePath(lines)}" fill="none" stroke="${isIndex ? "#a68a64" : "#cbb89d"}" stroke-width="${isIndex ? "1.15" : "0.7"}" opacity="${isIndex ? "0.9" : "0.75"}" />`;
+    if (Number.isFinite(elev) && lines[0]?.length >= 2) {
+      const midPt = lines[0][Math.floor(lines[0].length / 2)];
+      const [ex, ey] = proj(midPt[0], midPt[1]);
+      if (
+        ex > mapX + 34 &&
+        ex < mapX + mapW - 224 &&
+        ey > mapY + 40 &&
+        ey < mapY + mapH - 36 &&
+        placedElevPts.every(([px, py]) => Math.hypot(ex - px, ey - py) > 54)
+      ) {
+        placedElevPts.push([ex, ey]);
+        contSvg += `<text x="${ex.toFixed(1)}" y="${ey.toFixed(1)}" text-anchor="middle" font-size="6.8" font-weight="${isIndex ? "800" : "600"}" fill="#7c5d3b" stroke="#ffffff" stroke-width="2.2" paint-order="stroke">${Math.round(elev)}m</text>`;
+      }
+    }
   }
 
   // Watercourses + 40 m gully & 100 m perennial watercourse buffer halos
@@ -1231,10 +1249,33 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
         nbSvg += `<path d="${polyPath(rings)}" fill="${isAerial ? "none" : "#ffffff"}" stroke="${isAerial ? "rgba(255,255,255,0.55)" : "#cbd5e1"}" stroke-width="1" />`;
       }
     }
+    const placedDetailElevs = [];
     for (const cf of spatial.contours_geojson || []) {
       const lines = coordsOf(cf.geometry);
-      if (lines.length) {
-        contSvg += `<path d="${linePath(lines)}" fill="none" stroke="${isAerial ? "rgba(255,255,255,0.4)" : "#cbd5e1"}" stroke-width="0.85" />`;
+      if (!lines.length) continue;
+      const elev = Number(cf.properties?.elevation);
+      const isIndex = Number.isFinite(elev) && elev % 50 === 0;
+      const strokeCol = isAerial
+        ? (isIndex ? "rgba(253,230,138,0.82)" : "rgba(253,230,138,0.48)")
+        : (isIndex ? "#a68a64" : "#cbb89d");
+      contSvg += `<path d="${linePath(lines)}" fill="none" stroke="${strokeCol}" stroke-width="${isIndex ? "1.35" : "0.85"}" />`;
+      if (Number.isFinite(elev)) {
+        for (const line of lines) {
+          if (line.length < 2) continue;
+          const midPt = line[Math.floor(line.length / 2)];
+          const [ex, ey] = proj(midPt[0], midPt[1]);
+          if (
+            ex > mapX + 24 &&
+            ex < mapX + mapW - 24 &&
+            ey > mapY + 20 &&
+            ey < mapY + mapH - 42 &&
+            placedDetailElevs.every(([px, py]) => Math.hypot(ex - px, ey - py) > 58)
+          ) {
+            placedDetailElevs.push([ex, ey]);
+            contSvg += `<text x="${ex.toFixed(1)}" y="${ey.toFixed(1)}" text-anchor="middle" font-size="7.2" font-weight="700" fill="${isAerial ? "#fef08a" : "#7c5d3b"}" stroke="${isAerial ? "rgba(15,23,42,0.82)" : "#ffffff"}" stroke-width="2.4" paint-order="stroke">${Math.round(elev)}m</text>`;
+            break;
+          }
+        }
       }
     }
     if (spatial.parcel_geojson?.geometry) {

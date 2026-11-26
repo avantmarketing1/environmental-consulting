@@ -1394,6 +1394,28 @@ function updatePinModeUi() {
   renderPinPalette();
 }
 
+function getContourLayerStyle(feature) {
+  const elev = Number(feature?.properties?.elevation);
+  const isIndex = Number.isFinite(elev) && elev % 50 === 0;
+  const isDarkAerial = ["satellite", "hybrid", "nsw_aerial"].includes(activeBasemap);
+  const isTopoBase = ["topo", "terrain"].includes(activeBasemap);
+  return {
+    color: isDarkAerial ? "#fde68a" : "#92400e",
+    weight: isIndex ? 1.55 : 0.9,
+    opacity: isTopoBase ? (isIndex ? 0.45 : 0.25) : (isDarkAerial ? (isIndex ? 0.82 : 0.56) : (isIndex ? 0.65 : 0.42)),
+  };
+}
+
+function renderContoursOnMap() {
+  if (!wbContoursLayer) return;
+  wbContoursLayer.clearLayers();
+  if (!spatial?.contours_geojson?.length) return;
+  L.geoJSON(spatial.contours_geojson, {
+    style: getContourLayerStyle,
+    interactive: false,
+  }).addTo(wbContoursLayer);
+}
+
 function setBasemap(key) {
   const cfg = MAP_BASEMAPS[key] || MAP_BASEMAPS.satellite;
   activeBasemap = key in MAP_BASEMAPS ? key : "satellite";
@@ -1409,6 +1431,7 @@ function setBasemap(key) {
     if (cfg.refUrl) {
       wbBaseRefLayer = L.tileLayer(cfg.refUrl, { maxZoom: cfg.maxZoom, opacity: 0.92 }).addTo(wbMap);
     }
+    renderContoursOnMap();
   }
   document.querySelectorAll("#mapBasemapBar .basemap-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.basemap === activeBasemap);
@@ -1929,12 +1952,7 @@ function renderSpatialOnMap() {
       interactive: false,
     }).addTo(wbCadastreLayer);
   }
-  if (spatial.contours_geojson?.length) {
-    L.geoJSON(spatial.contours_geojson, {
-      style: { color: "#e2e8f0", weight: 0.9, opacity: 0.6 },
-      interactive: false,
-    }).addTo(wbContoursLayer);
-  }
+  renderContoursOnMap();
   if (spatial.watercourses_geojson?.length) {
     // Soft buffer halo + crisp mapped watercourse polyline
     L.geoJSON(spatial.watercourses_geojson, {
@@ -2402,9 +2420,9 @@ async function saveActiveJobToD1() {
   const spatialForApi = spatial
     ? {
         ...spatial,
-        contours_geojson: (spatial.contours_geojson || []).slice(0, 25),
-        neighbour_parcels_geojson: (spatial.neighbour_parcels_geojson || []).slice(0, 18),
-        watercourses_geojson: (spatial.watercourses_geojson || []).slice(0, 25),
+        contours_geojson: (spatial.contours_geojson || []).slice(0, 100),
+        neighbour_parcels_geojson: (spatial.neighbour_parcels_geojson || []).slice(0, 25),
+        watercourses_geojson: (spatial.watercourses_geojson || []).slice(0, 45),
       }
     : null;
   const payload = {
