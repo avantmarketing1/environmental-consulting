@@ -1349,23 +1349,48 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
   const barM = [5, 10, 20, 25, 50, 100, 200].reduce((a, b) => (Math.abs(b - targetBarM) < Math.abs(a - targetBarM) ? b : a));
   const barPx = barM * scale;
 
-  // Dedicated Right-Hand Legend Panel (Zero overlap with any pin; dynamically scales row height if many types exist)
-  const legRowStep = typeCounts.size > 9 ? Math.max(15, Math.floor(225 / typeCounts.size)) : 22;
-  const legSymScale = legRowStep < 19 ? 0.50 : 0.60;
-  const legFontSize = legRowStep < 19 ? 7.9 : 8.5;
+  // Dedicated Right-Hand Legend Panel using actual custom pin labels (deduplicating identical type+label pairs)
+  const legendEntries = [];
+  const legendKeyMap = new Map();
+  for (const item of vp.pins) {
+    const ft = item.pin.feature_type;
+    const rawLbl = String(item.pin.label || item.spec.label || ft).trim();
+    const k = `${ft}::${rawLbl.toLowerCase()}`;
+    if (legendKeyMap.has(k)) {
+      legendKeyMap.get(k).count += 1;
+    } else {
+      const entry = { ft, label: rawLbl, count: 1 };
+      legendKeyMap.set(k, entry);
+      legendEntries.push(entry);
+    }
+  }
+
+  const maxVisibleRows = 15;
+  const visibleEntries = legendEntries.slice(0, maxVisibleRows);
+  const overflowCount = legendEntries.length - visibleEntries.length;
+  const totalSlots = visibleEntries.length + (overflowCount > 0 ? 1 : 0);
+  const legRowStep = totalSlots > 10 ? Math.max(14, Math.floor(228 / totalSlots)) : 22;
+  const legSymScale = legRowStep < 16 ? 0.42 : legRowStep < 20 ? 0.50 : 0.60;
+  const legFontSize = legRowStep < 16 ? 7.3 : legRowStep < 20 ? 7.9 : 8.4;
+  const maxChars = legFontSize <= 7.5 ? 25 : 22;
   let legRowsSvg = "";
   let curY = legY + 33;
-  for (const [ft, count] of typeCounts.entries()) {
-    const spec = PIN_FEATURE_SPECS[ft] || PIN_FEATURE_SPECS.custom;
-    const countTxt = count > 1 ? ` (×${count})` : "";
+  for (const ent of visibleEntries) {
+    const countTxt = ent.count > 1 ? ` (×${ent.count})` : "";
+    const fullLbl = `${ent.label}${countTxt}`;
+    const shownLbl = fullLbl.length > maxChars ? `${fullLbl.slice(0, maxChars - 1)}…` : fullLbl;
     legRowsSvg += `
-      <g transform="translate(${legX + 19}, ${curY}) scale(${legSymScale.toFixed(2)})">${renderPinGlyphInner(ft)}</g>
-      <text x="${legX + 34}" y="${curY + 3.2}" font-size="${legFontSize}" font-weight="700" fill="#0f172a">${esc(spec.label)}${countTxt}</text>
+      <g transform="translate(${legX + 19}, ${curY}) scale(${legSymScale.toFixed(2)})">${renderPinGlyphInner(ent.ft)}</g>
+      <text x="${legX + 34}" y="${(curY + 3.0).toFixed(1)}" font-size="${legFontSize}" font-weight="700" fill="#0f172a">${esc(shownLbl)}</text>
     `;
     curY += legRowStep;
   }
+  if (overflowCount > 0) {
+    legRowsSvg += `<text x="${legX + 14}" y="${(curY + 2).toFixed(1)}" font-size="7.4" font-style="italic" fill="#475569">+ ${overflowCount} more (see schedule)</text>`;
+    curY += legRowStep;
+  }
 
-  const ctxStartY = Math.max(curY + 8, legY + legH - 134);
+  const ctxStartY = Math.max(curY + 6, legY + legH - 134);
   const backdropLabel = isAerial ? (options.aerialAttribution || "Aerial Imagery Backdrop") : "Vector GIS / CAD Backdrop";
   const zoningStr = (spatial?.land_zoning || []).join(", ") || "Verify LEP";
 

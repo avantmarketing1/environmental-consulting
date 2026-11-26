@@ -1,4 +1,4 @@
-const CACHE_NAME = "ftf-consulting-v19";
+const CACHE_NAME = "ftf-consulting-v20";
 const CDN_CACHE_NAME = "ftf-cdn-v1";
 
 const PRECACHE_URLS = [

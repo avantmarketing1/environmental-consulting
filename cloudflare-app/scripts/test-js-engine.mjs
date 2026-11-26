@@ -220,15 +220,17 @@ const pinDetailVectorSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial,
   backdropMode: "vector",
 });
 assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (9 PINS)"), "Zoomed Pin Map missing title/legend");
-assert.ok(!pinDetailVectorSvg.includes("MAIN DWELLING"), "Zoomed Pin Map must NOT place floating text labels on pins");
+const clippedCanvasSection = pinDetailVectorSvg.split('<g clip-path="url(#pinDetailClip)">')[1]?.split("</g>")[0] || "";
+assert.ok(!clippedCanvasSection.includes("MAIN DWELLING"), "Zoomed Pin Map must NOT place floating text labels on the map canvas");
 assert.ok(
-  pinDetailVectorSvg.includes("Primary Dwelling") &&
-    pinDetailVectorSvg.includes("Secondary Dwelling") &&
-    pinDetailVectorSvg.includes("Tourist / Eco Cabin") &&
-    pinDetailVectorSvg.includes("Farm Shed / Barn") &&
-    pinDetailVectorSvg.includes("Septic Tank") &&
-    pinDetailVectorSvg.includes("Reed Bed"),
-  "Zoomed Pin Map legend must identify every building & wastewater feature type",
+  pinDetailVectorSvg.includes("MAIN DWELLING") &&
+    pinDetailVectorSvg.includes("2ND DWELLING") &&
+    pinDetailVectorSvg.includes("ECO CABIN 1") &&
+    pinDetailVectorSvg.includes("FARM SHED") &&
+    pinDetailVectorSvg.includes("SEPTIC TANK") &&
+    pinDetailVectorSvg.includes("REED BED") &&
+    pinDetailVectorSvg.includes("BH1"),
+  "Zoomed Pin Map legend must display actual custom pin labels",
 );
 
 const pinDetailAerialSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {
