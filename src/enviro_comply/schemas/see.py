@@ -89,7 +89,7 @@ class SEEAssessmentInput(BaseModel):
     consultant: ConsultantDetails = Field(
         default_factory=lambda: ConsultantDetails(
             name="Field To Forest Environmental Consulting",
-            qualification="Environmental & Planning Consultant (Northern Rivers NSW)",
+            qualification="B.App.Sci. (Natural Resource Management)",
             licence_number=None,
             company="Field To Forest",
             email="consulting@fieldtoforestfarm.com",

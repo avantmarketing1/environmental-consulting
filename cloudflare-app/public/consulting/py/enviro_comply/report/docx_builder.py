@@ -283,6 +283,47 @@ def build_ossm_docx_report(
 
     doc.add_page_break()
 
+    _WATER_SUPPLY_PROSE = {
+        "roof_full_water_saving": "roof rainwater supply with full WELS water-saving fixtures",
+        "roof_standard": "roof rainwater supply with standard fixtures",
+        "reticulated_full_water_saving": "reticulated town water supply with full WELS water-saving fixtures",
+        "reticulated_standard": "reticulated town water supply with standard fixtures",
+    }
+    _WATER_SUPPLY_TITLE = {
+        "roof_full_water_saving": "Roof Rainwater (Full WELS Water-Saving Fixtures)",
+        "roof_standard": "Roof Rainwater (Standard Fixtures)",
+        "reticulated_full_water_saving": "Reticulated Town Water (Full WELS Water-Saving Fixtures)",
+        "reticulated_standard": "Reticulated Town Water (Standard Fixtures)",
+    }
+    _TREATMENT_LABELS = {
+        "primary_septic": "Primary Septic Tank",
+        "secondary_reed_bed": "Secondary Rigid Reed Bed",
+        "secondary_awts": "Secondary AWTS",
+        "secondary_generic": "Secondary Treatment",
+    }
+    _PIN_TYPE_LABELS = {
+        "dwelling": "Primary Dwelling",
+        "secondary_dwelling": "Secondary Dwelling",
+        "tourist_cabin": "Tourist / Eco Cabin",
+        "farm_shed": "Farm Shed / Barn",
+        "commercial_kitchen": "Commercial / Food Shed",
+        "septic_tank": "Septic Tank",
+        "grease_arrestor": "Grease Arrestor",
+        "reed_bed": "Reed Bed",
+        "pump_well": "Pump Well",
+        "eta_bed": "ETA Bed / LAA",
+        "reserve_laa": "Reserve LAA",
+        "borehole": "Soil Borehole",
+        "water_tank": "Rainwater Tank",
+        "swale": "Diversion Swale",
+        "gully": "Gully / Drainage",
+        "boundary": "Property Boundary",
+        "custom": "Custom Feature",
+    }
+    ws_prose = _WATER_SUPPLY_PROSE.get(inp.water_supply.value, inp.water_supply.value.replace("_", " "))
+    ws_title = _WATER_SUPPLY_TITLE.get(inp.water_supply.value, inp.water_supply.value.replace("_", " ").title())
+    trt_title = _TREATMENT_LABELS.get(inp.treatment_system.value, inp.treatment_system.value.replace("_", " ").title())
+
     # =========================================================================
     # SECTION 1: EXECUTIVE SUMMARY & SYSTEM SELECTION JUSTIFICATION
     # =========================================================================
@@ -296,7 +337,7 @@ def build_ossm_docx_report(
             f"Section 68 Local Government Act 1993 application to {inp.lga} for the installation of a "
             f"{inp.development_description} at {inp.site_address} (Lot {inp.lot_number} {inp.plan_label}). "
             f"The system is sized for {model.design_persons} Equivalent Persons generating {model.total_flow_ld:.0f} L/day "
-            f"({model.annual_flow_m3:.1f} m³/yr) based on {inp.water_supply.value.replace('_', ' ')} water supply and site usage."
+            f"({model.annual_flow_m3:.1f} m³/yr) based on {ws_prose} and site usage."
         )
 
     _add_heading(doc, "1.1 System Selection Justification (LCC Strategy s5.3 & Table B2)", level=2)
@@ -396,7 +437,11 @@ def build_ossm_docx_report(
             ("Acid Sulfate Soils (ASS) Risk", ", ".join(spatial.acid_sulfate_soils) if spatial.acid_sulfate_soils else "None mapped"),
             ("Bushfire Prone Land (BFPL)", ", ".join(spatial.bushfire_prone_land) if spatial.bushfire_prone_land else "None mapped"),
             ("Riparian / Wetlands / Biodiversity", f"Riparian: {'Yes' if spatial.riparian_land else 'No'} | Wetlands: {'Yes' if spatial.wetlands else 'No'} | Biodiversity: {'Yes' if spatial.terrestrial_biodiversity else 'No'}"),
-            ("Nearest Mapped Watercourse (Parcel Edge)", f"{spatial.nearest_watercourse_m:.1f} m" if spatial.nearest_watercourse_m is not None else "None within 300 m search radius"),
+            ("Nearest Mapped Watercourse (Parcel Edge)", (
+                f"{spatial.nearest_watercourse_m:.1f} m (intersects parcel; LAA setback verified at {se.dist_perennial_watercourse_m:.0f} m per Section 7)"
+                if (spatial.nearest_watercourse_m is not None and spatial.nearest_watercourse_m < 0.5 and se.dist_perennial_watercourse_m is not None)
+                else (f"{spatial.nearest_watercourse_m:.1f} m" if spatial.nearest_watercourse_m is not None else "None within 300 m search radius")
+            )),
         ],
     )
     if spatial.pre_site_flags:
@@ -427,7 +472,7 @@ def build_ossm_docx_report(
         if inp.field_pins:
             pin_rows = []
             for fp in inp.field_pins:
-                ft_label = fp.feature_type.replace("_", " ").title()
+                ft_label = _PIN_TYPE_LABELS.get(fp.feature_type, fp.feature_type.replace("_", " ").title())
                 e_str = f"{fp.easting_mga56:,.1f}" if fp.easting_mga56 is not None else "—"
                 n_str = f"{fp.northing_mga56:,.1f}" if fp.northing_mga56 is not None else "—"
                 ll_str = f"{fp.latitude:.5f}, {fp.longitude:.5f}" if (fp.latitude is not None and fp.longitude is not None) else "—"
@@ -449,7 +494,7 @@ def build_ossm_docx_report(
         ["Address & Lot/DP", f"{inp.site_address} (Lot {inp.lot_number} {inp.plan_label})", "INFO"],
         ["Local Government Area", inp.lga, "INFO"],
         ["Date of Assessment", se.assessment_date.strftime("%d/%m/%Y"), "INFO"],
-        ["Water Supply & Fixtures", f"{inp.water_supply.value.replace('_', ' ').title()} ({model.flow_rate_lpd:.0f} L/p/d)", "INFO"],
+        ["Water Supply & Fixtures", f"{ws_title} ({model.flow_rate_lpd:.0f} L/p/d)", "INFO"],
         ["Recent Weather Conditions", se.recent_weather, "INFO"],
         ["Allotment / HIA Size", mo_line, "INFO"],
         ["Existing Vegetation", se.existing_vegetation, "INFO"],
@@ -704,9 +749,9 @@ def build_ossm_docx_report(
         doc,
         ["Excel Model Sheet / Block", "Key Input / Formula Check", "Verified Output"],
         [
-            ["Inputs (Cells C6–C26)", f"{model.design_persons} EP · {inp.water_supply.value.replace('_', ' ')} · Block {inp.block_size_m2:,.0f} m² · Buffer {inp.buffer_feature.value} @ {inp.buffer_distance_m:.0f} m", f"Q = {model.total_flow_ld:.0f} L/d ({model.annual_flow_m3:.1f} m³/yr)"],
+            ["Inputs (Cells C6–C26)", f"{model.design_persons} EP · {ws_title} · Block {inp.block_size_m2:,.0f} m² · Buffer {inp.buffer_feature.value.replace('_', ' ').title()} @ {inp.buffer_distance_m:.0f} m", f"Q = {model.total_flow_ld:.0f} L/d ({model.annual_flow_m3:.1f} m³/yr)"],
             ["Soil & Bucket (Rows 24–40)", f"Soil ID {inp.soil_texture_id} ({model.soil_texture_name}) · Root {inp.root_zone_depth_mm:.0f} mm + Gravel {inp.gravel_depth_mm:.0f} mm", f"DLR/DIR {model.max_deep_drainage_mmd:.1f} mm/d · Sat {model.bucket_cap_sat_mm:.1f} mm / AWC {model.bucket_cap_awc_mm:.1f} mm"],
-            ["Kinetics (AM16–BA26)", f"System: {inp.treatment_system.value.replace('_', ' ')} · Influent BOD5 {model.weighted_influent_bod_mgl:.0f} mg/L", f"RB {model.reed_bed_required_m2:.1f} m² · HRT {model.reed_bed_hrt_days:.1f} d · N Rem {model.n_removal_pct:.1f}%"],
+            ["Kinetics (AM16–BA26)", f"System: {trt_title} · Influent BOD5 {model.weighted_influent_bod_mgl:.0f} mg/L", f"RB {model.reed_bed_required_m2:.1f} m² · HRT {model.reed_bed_hrt_days:.1f} d · N Rem {model.n_removal_pct:.1f}%"],
             ["Daily Water Balance (C31)", "7,670-day Alstonville series (1970–1991); target 95th-percentile exceedance = 0.0 mm", f"Hydraulic Area = {model.hydraulic_area_m2:.1f} m² (Exceed: {model.exceedance_days_count} d / {model.exceedance_pct_of_days:.2f}%)"],
             ["Nutrient Balances (C32–C33)", f"Morand '{model.morand_code}' (P-sorp {model.p_sorption_kg_ha_m:,.0f} kg/ha/m; WT {se.depth_to_water_table_m:.1f} m)", f"Nitrogen = {model.nitrogen_area_m2:.1f} m² · Phosphorus = {model.phosphorus_area_m2:.1f} m²"],
             ["Governing LAA (C34 & Designer)", f"Max(Hydraulic, Nitrogen, Phosphorus, Area Cap {model.area_cap_m2:.1f} m²)", f"{model.required_laa_m2:.1f} m² ({model.limiting_factor}) + {model.reserve_laa_m2:.1f} m² Reserve"],

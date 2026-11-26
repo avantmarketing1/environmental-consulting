@@ -763,12 +763,19 @@ export function auditLismoreComplianceJS(inp, spatial, model, rules) {
   }
 
   // --- 4. TREATMENT & LAND APPLICATION RULES ---
+  const TRT_LABELS = {
+    primary_septic: "Primary Septic Tank",
+    secondary_reed_bed: "Secondary Rigid Reed Bed",
+    secondary_awts: "Secondary AWTS",
+    secondary_generic: "Secondary Treatment",
+  };
+  const trtLabel = TRT_LABELS[inp.treatment_system] || inp.treatment_system;
   const isSecondary = inp.treatment_system !== "primary_septic";
   if (needsSec && !isSecondary) {
     departures.push("Site/soil limitations trigger secondary treatment, but Primary-only system is nominated.");
-    add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system, "Secondary treatment required", "LCC Strategy 2013 Tables 6 & 7", "FAIL", "Upgrade to Reed Bed or NSW Health accredited AWTS.");
+    add("TRT-LEVEL", "Treatment", "Treatment Level", trtLabel, "Secondary treatment required", "LCC Strategy 2013 Tables 6 & 7", "FAIL", "Upgrade to Reed Bed or NSW Health accredited AWTS.");
   } else {
-    add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system, "Appropriate for site/soil class", "LCC Strategy 2013 Appendix A", "PASS");
+    add("TRT-LEVEL", "Treatment", "Treatment Level", trtLabel, "Appropriate for site/soil class", "LCC Strategy 2013 Appendix A", "PASS");
   }
 
   if (inp.treatment_system === "secondary_reed_bed") {
@@ -865,6 +872,31 @@ function escXml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function aspectToBearingDeg(aspectStr) {
+  const s = String(aspectStr || "").trim().toUpperCase().replace(/[\s_-]+/g, "");
+  const num = Number(s.replace(/°$/, ""));
+  if (s && Number.isFinite(num)) return ((num % 360) + 360) % 360;
+  const map = {
+    N: 0, NORTH: 0,
+    NNE: 22.5, NORTHNORTHEAST: 22.5,
+    NE: 45, NORTHEAST: 45,
+    ENE: 67.5, EASTNORTHEAST: 67.5,
+    E: 90, EAST: 90,
+    ESE: 112.5, EASTSOUTHEAST: 112.5,
+    SE: 135, SOUTHEAST: 135,
+    SSE: 157.5, SOUTHSOUTHEAST: 157.5,
+    S: 180, SOUTH: 180,
+    SSW: 202.5, SOUTHSOUTHWEST: 202.5,
+    SW: 225, SOUTHWEST: 225,
+    WSW: 247.5, WESTSOUTHWEST: 247.5,
+    W: 270, WEST: 270,
+    WNW: 292.5, WESTNORTHWEST: 292.5,
+    NW: 315, NORTHWEST: 315,
+    NNW: 337.5, NORTHNORTHWEST: 337.5,
+  };
+  return map[s] ?? null;
 }
 
 export function renderCadLayoutSvg(inp, model) {
@@ -1030,7 +1062,7 @@ export function renderCadLayoutSvg(inp, model) {
 
   const vegY = laaBottomY + 20;
   const resY = vegY + 18;
-  const resH = isIrrig ? 52 : 38;
+  const resH = isIrrig ? 52 : 42;
   const H = resY + resH + 64; // Dynamic SVG height so ALL beds + reserve + footer ALWAYS fit!
 
   // Graphic metric scale bar (exact pxPerM)
@@ -1038,6 +1070,17 @@ export function renderCadLayoutSvg(inp, model) {
   const barPx = Math.round(barMeters * pxPerM);
   const barX = W - 26 - barPx;
   const barY = 58;
+
+  // Dynamic North arrow rotation so Down on the schematic always matches the site's true downslope Fall Aspect
+  const aspectText = inp.site_eval?.aspect ?? "South";
+  const fallBearing = aspectToBearingDeg(aspectText);
+  const northRotDeg = fallBearing !== null ? (180 - fallBearing + 360) % 360 : 0;
+  const northRad = (northRotDeg * Math.PI) / 180;
+  const nLabelX = (22 * Math.sin(northRad)).toFixed(1);
+  const nLabelY = (-22 * Math.cos(northRad) + 4).toFixed(1);
+
+  const cadTitleText = `SCALED OSSM LAYOUT PLAN — ${inp.site_address || ""} (Lot ${inp.lot_number || ""} ${inp.plan_label || ""})`;
+  const cadTitleFontSize = cadTitleText.length > 90 ? 10.0 : cadTitleText.length > 74 ? 11.2 : 12.8;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#fff; border:1px solid #d7dfd9; border-radius:10px; font-family:Inter,sans-serif;">
     <defs>
@@ -1049,15 +1092,18 @@ export function renderCadLayoutSvg(inp, model) {
       </marker>
     </defs>
     <rect width="${W}" height="${H}" fill="url(#grid)" />
-    <text x="${W / 2}" y="24" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
-      SCALED OSSM LAYOUT PREVIEW — ${escXml(inp.site_address)} (Lot ${escXml(inp.lot_number)} ${escXml(inp.plan_label)})
+    <text x="${W / 2}" y="24" text-anchor="middle" font-size="${cadTitleFontSize}" font-weight="800" fill="#0d241b">
+      ${escXml(cadTitleText)}
     </text>
 
-    <!-- North arrow -->
-    <g transform="translate(44, 56)">
-      <line x1="0" y1="36" x2="0" y2="6" stroke="#0d241b" stroke-width="2.5" />
-      <polygon points="0,0 -6,12 6,12" fill="#0d241b" />
-      <text x="0" y="-4" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">N</text>
+    <!-- North arrow (rotated dynamically so Down = true Fall Aspect) -->
+    <g transform="translate(52, 76)">
+      <circle cx="0" cy="0" r="17" fill="rgba(255,255,255,0.85)" stroke="#cbd5e1" stroke-width="1" />
+      <g transform="rotate(${northRotDeg})">
+        <line x1="0" y1="13" x2="0" y2="-9" stroke="#0d241b" stroke-width="2.4" />
+        <polygon points="0,-16 -5,-6 5,-6" fill="#0d241b" />
+      </g>
+      <text x="${nLabelX}" y="${nLabelY}" text-anchor="middle" font-size="11.5" font-weight="800" fill="#0d241b">N</text>
     </g>
 
     <!-- True Metric Scale Bar (Reed Bed & LAA) -->
@@ -1103,16 +1149,20 @@ export function renderCadLayoutSvg(inp, model) {
 
     <!-- Reserve LAA -->
     <rect x="${cx - laaDrawW / 2}" y="${resY}" width="${laaDrawW}" height="${resH}" fill="#f1f5f9" stroke="#0f766e" stroke-width="1.6" stroke-dasharray="6,4" />
-    <text x="${cx}" y="${resY + resH / 2 + 4}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#115e59">
-      NOMINATED 100% ALTERNATE (RESERVE) LAA (${model.reserve_laa_m2} m²)
+    <text x="${cx}" y="${resY + resH / 2 - 2}" text-anchor="middle" font-size="9.8" font-weight="800" fill="#115e59">
+      NOMINATED 100% RESERVE LAA
+    </text>
+    <text x="${cx}" y="${resY + resH / 2 + 12}" text-anchor="middle" font-size="9.4" font-weight="600" fill="#0f766e">
+      Alternate Disposal Area (${model.reserve_laa_m2} m²)
     </text>
 
     <!-- Slope indicator -->
     <g transform="translate(${W - 56}, ${laaStartY + 10})">
       <text x="0" y="-12" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">FALL ${inp.site_eval?.slope_pct ?? 7}%</text>
-      <text x="0" y="2" text-anchor="middle" font-size="9.5" fill="#52635c">(${escXml(inp.site_eval?.aspect ?? "SW")})</text>
+      <text x="0" y="2" text-anchor="middle" font-size="9.5" fill="#52635c">(${escXml(aspectText)})</text>
       <line x1="0" y1="14" x2="0" y2="74" stroke="#334155" stroke-width="2" />
       <polygon points="0,82 -5,70 5,70" fill="#334155" />
+      <text x="0" y="96" text-anchor="middle" font-size="7.6" fill="#64748b">Oriented Downslope</text>
     </g>
 
     <!-- Title Footer -->

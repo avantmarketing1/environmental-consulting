@@ -86,7 +86,7 @@ class CustomReportNarratives(BaseModel):
 
 class ConsultantDetails(BaseModel):
     name: str
-    qualification: str = "Accredited Wastewater Consultant"
+    qualification: str = "B.App.Sci. (Natural Resource Management)"
     licence_number: Optional[str] = None
     company: Optional[str] = None
     phone: Optional[str] = None

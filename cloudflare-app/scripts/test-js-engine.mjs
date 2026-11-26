@@ -95,9 +95,15 @@ assert.equal(scRes.trench_layout.trench_length_m, 11.2);
 const scAudit = auditLismoreComplianceJS(sc, { drinking_water_catchment: false, flood_planning: false }, scRes, rules);
 assert.equal(scAudit.requires_gypsum, true);
 assert.equal(scAudit.departures_from_strategy.length, 0);
+const trtCheck = scAudit.checks.find((c) => c.code === "TRT-LEVEL");
+assert.equal(trtCheck?.measured_value, "Secondary Rigid Reed Bed", "TRT-LEVEL should use human-readable label");
 
 const svg = renderCadLayoutSvg(sc, scRes);
 assert.ok(svg.includes("ETA BED 1: 11.2 m"), "SVG layout should include exact ETA dimensions");
+assert.ok(svg.includes("SCALED OSSM LAYOUT PLAN") && !svg.includes("PREVIEW"), "CAD layout title should say PLAN, not PREVIEW");
+assert.ok(svg.includes("rotate(135)"), "North-East fall (45 deg) should rotate North arrow by 135 deg so Down = NE");
+const eastSvg = renderCadLayoutSvg({ ...sc, site_eval: { ...sc.site_eval, aspect: "East" } }, scRes);
+assert.ok(eastSvg.includes("rotate(90)"), "East fall (90 deg) should rotate North arrow 90 deg CW (Right) so Down = East");
 
 // 2) Test LCC Excel Workbook Default Case (600 L/d AWTS)
 const wbDef = {

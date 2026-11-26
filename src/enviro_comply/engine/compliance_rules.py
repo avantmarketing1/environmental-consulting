@@ -253,12 +253,19 @@ def audit_lismore_compliance(
         add("SOIL-DEPTH", "Soil", "Depth to Water Table / Bedrock", f"{se.depth_to_water_table_m:.1f} m", ">= 1.0 m", "LCC Strategy 2013 s5.4.2(h) & Table 7", "PASS")
 
     # --- 4. TREATMENT & LAND APPLICATION RULES ---
+    trt_labels = {
+        "primary_septic": "Primary Septic Tank",
+        "secondary_reed_bed": "Secondary Rigid Reed Bed",
+        "secondary_awts": "Secondary AWTS",
+        "secondary_generic": "Secondary Treatment",
+    }
+    trt_label = trt_labels.get(inp.treatment_system.value, inp.treatment_system.value)
     is_secondary = inp.treatment_system != TreatmentSystemType.PRIMARY_SEPTIC
     if needs_secondary and not is_secondary:
         departures.append("Site/soil limitations trigger secondary treatment, but Primary-only system is nominated.")
-        add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system.value, "Secondary treatment required", "LCC Strategy 2013 Tables 6 & 7", "FAIL", "Upgrade to Reed Bed or NSW Health accredited AWTS.")
+        add("TRT-LEVEL", "Treatment", "Treatment Level", trt_label, "Secondary treatment required", "LCC Strategy 2013 Tables 6 & 7", "FAIL", "Upgrade to Reed Bed or NSW Health accredited AWTS.")
     else:
-        add("TRT-LEVEL", "Treatment", "Treatment Level", inp.treatment_system.value, "Appropriate for site/soil class", "LCC Strategy 2013 Appendix A", "PASS")
+        add("TRT-LEVEL", "Treatment", "Treatment Level", trt_label, "Appropriate for site/soil class", "LCC Strategy 2013 Appendix A", "PASS")
 
     if inp.treatment_system == TreatmentSystemType.SECONDARY_REED_BED:
         if model.reed_bed_hrt_days < limits["reed_bed_min_hrt_days_secondary"]:

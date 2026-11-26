@@ -217,7 +217,7 @@ const pyPending = new Map();
 
 function getPyWorker() {
   if (!pyWorker) {
-    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=22");
+    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=23");
     pyWorker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === "status") {
@@ -567,7 +567,7 @@ function createBlankAssessment() {
     ],
     consultant: {
       name: "Field To Forest Environmental Consulting",
-      qualification: "Accredited Wastewater Consultant (Northern Rivers NSW)",
+      qualification: "B.App.Sci. (Natural Resource Management)",
       licence_number: null,
       company: "Field To Forest",
       phone: "",
@@ -599,6 +599,12 @@ function hydrateFormFromState() {
   const a = assessment;
   if (a?.consultant?.licence_number && String(a.consultant.licence_number).trim().toUpperCase() === "FTF-NSW") {
     a.consultant.licence_number = null;
+  }
+  if (a?.consultant) {
+    const q = String(a.consultant.qualification || "").trim();
+    if (!q || /accredited wastewater consultant|environmental\s*&\s*planning consultant/i.test(q)) {
+      a.consultant.qualification = "B.App.Sci. (Natural Resource Management)";
+    }
   }
   const se = a.site_eval;
   document.getElementById("fProjectRef").value = a.project_ref || "";

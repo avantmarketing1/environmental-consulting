@@ -574,7 +574,7 @@ def run_lismore_wastewater_model(inp: SiteAssessmentInput) -> WastewaterModelRes
         limiting_factor=limiting_factor,  # type: ignore[arg-type]
         reserve_laa_m2=round(required_laa_m2, 1),
         septic_tank_min_l=septic_min_l,
-        septic_retention_days=round(septic_retention_days, 1),
+        septic_retention_days=math.floor(septic_retention_days * 10.0 + 0.5) / 10.0,
         source_breakdown=source_breakdown,
         weighted_influent_bod_mgl=round(bod_inlet_mgl, 1),
         grease_arrestor_min_l=grease_arrestor_min_l,

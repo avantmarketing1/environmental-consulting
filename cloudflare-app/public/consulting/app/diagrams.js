@@ -298,7 +298,8 @@ export function renderSepticCrossSectionSvg(model) {
 
     <!-- Ground line -->
     <line x1="28" y1="84" x2="480" y2="84" stroke="#15803d" stroke-width="2" stroke-dasharray="8,4" />
-    <text x="36" y="77" font-size="9" font-weight="700" fill="#15803d">FINISHED GROUND LEVEL</text>
+    <text x="30" y="67" font-size="8.2" font-weight="700" fill="#15803d">FINISHED</text>
+    <text x="30" y="77" font-size="8.2" font-weight="700" fill="#15803d">GROUND LEVEL</text>
 
     <!-- Crusher dust bedding -->
     <rect x="78" y="314" width="354" height="18" fill="#d6d3d1" stroke="#57534e" stroke-width="1.2" />
@@ -689,14 +690,14 @@ export function renderEtaCrossSectionSvg(inp, model, audit) {
     <!-- Crowned perennial grass topsoil mound -->
     <path d="M 180 154 Q 370 116 560 154 L 560 200 L 180 200 Z" fill="#d9a973" stroke="#92400e" stroke-width="1.5" />
     <path d="M 178 154 Q 370 114 562 154" fill="none" stroke="#15803d" stroke-width="4.5" />
-    <text x="370" y="168" text-anchor="middle" font-size="10" font-weight="700" fill="#451a03">FRIABLE TOPSOIL (${rootMm} mm) + MOWED PERENNIAL GRASS</text>
+    <text x="352" y="168" text-anchor="middle" font-size="9.4" font-weight="700" fill="#451a03">FRIABLE TOPSOIL (${rootMm} mm) + MOWED PERENNIAL GRASS</text>
 
     <!-- Geotextile matting separator -->
     <path d="M 180 200 L 315 200 Q 370 184 425 200 L 560 200" fill="none" stroke="#0f172a" stroke-width="3.2" />
 
     <!-- Clean gravel bed -->
     <rect x="180" y="202" width="380" height="92" fill="#cbd5e1" stroke="#1e293b" stroke-width="2.2" />
-    <text x="370" y="264" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1e293b">
+    <text x="352" y="264" text-anchor="middle" font-size="9.8" font-weight="700" fill="#1e293b">
       CLEAN WASHED 20–50 mm BLUE METAL / GRAVEL (${gravMm} mm DEEP)
     </text>
 
@@ -704,16 +705,16 @@ export function renderEtaCrossSectionSvg(inp, model, audit) {
     <circle cx="370" cy="218" r="14" fill="#ffffff" stroke="#dc2626" stroke-width="2.5" />
     <circle cx="370" cy="218" r="6" fill="none" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="2,2" />
 
-    <!-- Inspection shaft -->
-    <rect x="444" y="136" width="16" height="158" fill="#fef08a" stroke="#854d0e" stroke-width="1.5" />
+    <!-- Inspection shaft (positioned near right edge of gravel bed to avoid crossing layer labels) -->
+    <rect x="524" y="142" width="14" height="152" fill="#fef08a" stroke="#854d0e" stroke-width="1.5" />
 
     <!-- Callout leaders -->
     <line x1="370" y1="204" x2="370" y2="96" stroke="#dc2626" stroke-width="1.2" />
     <text x="370" y="78" text-anchor="middle" font-size="9.5" font-weight="800" fill="#dc2626">100 mm SLOTTED PVC PIPE (CENTRALLY FED)</text>
     <text x="370" y="91" text-anchor="middle" font-size="8.8" font-weight="700" fill="#991b1b">NO GEOTEXTILE SOCK ON PIPE (LCC Strategy App. B s3.0)</text>
 
-    <line x1="452" y1="136" x2="510" y2="112" stroke="#854d0e" stroke-width="1.2" />
-    <text x="515" y="114" font-size="9" font-weight="700" fill="#854d0e">100 mm Inspection Shaft</text>
+    <line x1="531" y1="142" x2="572" y2="112" stroke="#854d0e" stroke-width="1.2" />
+    <text x="577" y="114" font-size="9" font-weight="700" fill="#854d0e">100 mm Inspection Shaft</text>
 
     <line x1="255" y1="200" x2="215" y2="114" stroke="#0f172a" stroke-width="1.2" />
     <text x="210" y="112" text-anchor="end" font-size="9" font-weight="700" fill="#0f172a">Geotextile Fabric Mat</text>
@@ -1093,13 +1094,16 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
   const barPx = barM * scale;
   const zoningStr = (spatial.land_zoning || []).join(", ") || "Verify LEP";
 
+  const gisTitleText = `SITE LOCATION & ENVIRONMENTAL CONSTRAINTS MAP — ${inp.site_address || ""} (Lot ${inp.lot_number || ""} ${inp.plan_label || ""})`;
+  const gisTitleFontSize = gisTitleText.length > 94 ? 10.0 : gisTitleText.length > 78 ? 11.2 : 12.8;
+
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
     <defs>
       <clipPath id="gisClip"><rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" /></clipPath>
     </defs>
 
-    <text x="${W / 2}" y="26" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
-      SITE LOCATION &amp; ENVIRONMENTAL CONSTRAINTS MAP — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
+    <text x="${W / 2}" y="26" text-anchor="middle" font-size="${gisTitleFontSize}" font-weight="800" fill="#0d241b">
+      ${esc(gisTitleText)}
     </text>
 
     <rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" fill="#f8fafc" stroke="#1e293b" stroke-width="1.4" />
@@ -1249,6 +1253,7 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
         nbSvg += `<path d="${polyPath(rings)}" fill="${isAerial ? "none" : "#ffffff"}" stroke="${isAerial ? "rgba(255,255,255,0.55)" : "#cbd5e1"}" stroke-width="1" />`;
       }
     }
+    const pinPixels = vp.pins.map((item) => proj(item.lon, item.lat));
     const placedDetailElevs = [];
     for (const cf of spatial.contours_geojson || []) {
       const lines = coordsOf(cf.geometry);
@@ -1269,7 +1274,8 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
             ex < mapX + mapW - 24 &&
             ey > mapY + 20 &&
             ey < mapY + mapH - 42 &&
-            placedDetailElevs.every(([px, py]) => Math.hypot(ex - px, ey - py) > 58)
+            placedDetailElevs.every(([px, py]) => Math.hypot(ex - px, ey - py) > 58) &&
+            pinPixels.every(([ppx, ppy]) => Math.hypot(ex - ppx, ey - ppy) > 26)
           ) {
             placedDetailElevs.push([ex, ey]);
             contSvg += `<text x="${ex.toFixed(1)}" y="${ey.toFixed(1)}" text-anchor="middle" font-size="7.2" font-weight="700" fill="${isAerial ? "#fef08a" : "#7c5d3b"}" stroke="${isAerial ? "rgba(15,23,42,0.82)" : "#ffffff"}" stroke-width="2.4" paint-order="stroke">${Math.round(elev)}m</text>`;
@@ -1394,13 +1400,16 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
   const backdropLabel = isAerial ? (options.aerialAttribution || "Aerial Imagery Backdrop") : "Vector GIS / CAD Backdrop";
   const zoningStr = (spatial?.land_zoning || []).join(", ") || "Verify LEP";
 
+  const detailTitleText = `INFRASTRUCTURE & GPS FEATURE PLAN — ${inp.site_address || ""} (Lot ${inp.lot_number || ""} ${inp.plan_label || ""})`;
+  const detailTitleFontSize = detailTitleText.length > 92 ? 10.0 : detailTitleText.length > 76 ? 11.2 : 12.8;
+
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
     <defs>
       <clipPath id="pinDetailClip"><rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" /></clipPath>
     </defs>
 
-    <text x="${W / 2}" y="26" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
-      INFRASTRUCTURE &amp; GPS FEATURE PLAN — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
+    <text x="${W / 2}" y="26" text-anchor="middle" font-size="${detailTitleFontSize}" font-weight="800" fill="#0d241b">
+      ${esc(detailTitleText)}
     </text>
 
     <!-- Map Canvas -->
@@ -1503,7 +1512,7 @@ export function renderSizingAndWaterBalanceSvg(inp, model) {
   const months = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
   const rain = [194, 232, 239, 178, 152, 134, 88, 72, 64, 108, 136, 165];
   const et = [146, 121, 114, 89, 68, 56, 61, 79, 101, 123, 134, 151];
-  const chartX = 416, chartY = 92, chartW = 312, chartH = 148;
+  const chartX = 416, chartY = 100, chartW = 312, chartH = 140;
   const maxMm = 260;
   const stepX = chartW / months.length;
 
@@ -1539,7 +1548,11 @@ export function renderSizingAndWaterBalanceSvg(inp, model) {
 
     <!-- Right panel -->
     <rect x="386" y="54" width="358" height="212" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
-    <text x="398" y="71" font-size="9.6" font-weight="800" fill="#143628">2. ALSTONVILLE RAINFALL vs. ET (1970–1991)</text>
+    <text x="398" y="70" font-size="9.6" font-weight="800" fill="#143628">2. ALSTONVILLE RAINFALL vs. ET (1970–1991)</text>
+    <rect x="398" y="78" width="10" height="8" fill="#93c5fd" stroke="#1d4ed8" stroke-width="0.8" />
+    <text x="412" y="85" font-size="8" fill="#334155">Mean Rain (mm)</text>
+    <line x1="504" y1="82" x2="518" y2="82" stroke="#b45309" stroke-width="2.2" />
+    <text x="522" y="85" font-size="8" fill="#334155">Crop ET (mm)</text>
     <line x1="${chartX}" y1="${chartY + chartH}" x2="${chartX + chartW}" y2="${chartY + chartH}" stroke="#475569" stroke-width="1.2" />
     <line x1="${chartX}" y1="${chartY}" x2="${chartX}" y2="${chartY + chartH}" stroke="#475569" stroke-width="1.2" />
     <text x="${chartX - 4}" y="${chartY + 6}" text-anchor="end" font-size="7.6" fill="#64748b">260</text>
@@ -1547,10 +1560,6 @@ export function renderSizingAndWaterBalanceSvg(inp, model) {
     <text x="${chartX - 4}" y="${chartY + chartH}" text-anchor="end" font-size="7.6" fill="#64748b">0</text>
     ${climateBars}
     <path d="${etPts.trim()}" fill="none" stroke="#b45309" stroke-width="2.2" />
-    <rect x="556" y="61" width="10" height="8" fill="#93c5fd" stroke="#1d4ed8" stroke-width="0.8" />
-    <text x="570" y="68" font-size="8" fill="#334155">Mean Rain (mm)</text>
-    <line x1="654" y1="65" x2="668" y2="65" stroke="#b45309" stroke-width="2.2" />
-    <text x="672" y="68" font-size="8" fill="#334155">Crop ET</text>
 
     <!-- Exceedance verification footer -->
     <rect x="16" y="274" width="${W - 32}" height="26" rx="6" fill="#f0fdf4" stroke="#166534" stroke-width="1" />

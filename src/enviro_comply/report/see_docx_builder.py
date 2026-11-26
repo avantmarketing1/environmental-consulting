@@ -263,9 +263,29 @@ def build_see_docx_report(
             width_in=6.5,
         )
         if field_pins:
+            _PIN_TYPE_LABELS = {
+                "dwelling": "Primary Dwelling",
+                "secondary_dwelling": "Secondary Dwelling",
+                "tourist_cabin": "Tourist / Eco Cabin",
+                "farm_shed": "Farm Shed / Barn",
+                "commercial_kitchen": "Commercial / Food Shed",
+                "septic_tank": "Septic Tank",
+                "grease_arrestor": "Grease Arrestor",
+                "reed_bed": "Reed Bed",
+                "pump_well": "Pump Well",
+                "eta_bed": "ETA Bed / LAA",
+                "reserve_laa": "Reserve LAA",
+                "borehole": "Soil Borehole",
+                "water_tank": "Rainwater Tank",
+                "swale": "Diversion Swale",
+                "gully": "Gully / Drainage",
+                "boundary": "Property Boundary",
+                "custom": "Custom Feature",
+            }
             pin_rows = []
             for fp in field_pins:
-                ft_label = str(fp.get("feature_type") or "feature").replace("_", " ").title()
+                raw_ft = str(fp.get("feature_type") or "feature")
+                ft_label = _PIN_TYPE_LABELS.get(raw_ft, raw_ft.replace("_", " ").title())
                 e_val = fp.get("easting_mga56")
                 n_val = fp.get("northing_mga56")
                 lat_val = fp.get("latitude")
