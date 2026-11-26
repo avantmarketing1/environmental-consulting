@@ -1,4 +1,4 @@
-const CACHE_NAME = "ftf-consulting-v17";
+const CACHE_NAME = "ftf-consulting-v18";
 const CDN_CACHE_NAME = "ftf-cdn-v1";
 
 const PRECACHE_URLS = [
@@ -104,8 +104,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Never cache mutable auth or file download API endpoints
-  if (url.pathname.startsWith("/consulting/api/auth/") || url.pathname.startsWith("/consulting/api/files/")) {
+  // Never cache mutable auth, file download, or explicit fresh spatial precheck endpoints
+  if (
+    url.pathname.startsWith("/consulting/api/auth/") ||
+    url.pathname.startsWith("/consulting/api/files/") ||
+    (url.pathname === "/consulting/api/spatial/precheck" && url.searchParams.get("fresh") === "1")
+  ) {
     return;
   }
 

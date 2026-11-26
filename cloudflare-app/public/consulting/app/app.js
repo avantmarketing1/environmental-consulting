@@ -1701,9 +1701,9 @@ function renderMapPins() {
   if (wbFootprintsLayer) wbFootprintsLayer.clearLayers();
   const pins = assessment?.field_pins || [];
   const zoom = wbMap.getZoom();
-  // Compact precision markers on the interactive map so exact roofs/fixtures remain visible when placing pins
+  // Compact precision markers; auto-hide label pills when zoomed out (< 17) to prevent pile-ups on large rural lots (hover still shows label)
   const iconPx = zoom >= 19 ? 20 : zoom >= 17 ? 17 : 14;
-  const showLabels = document.getElementById("chkLayerLabels")?.checked !== false;
+  const showLabels = document.getElementById("chkLayerLabels")?.checked !== false && zoom >= 17;
   const markerMap = new Map();
 
   pins.forEach((p, idx) => {
@@ -1981,13 +1981,32 @@ function renderSpatialOnMap() {
   updateSidebarProgress();
 }
 
+async function upgradeLegacySpatialContoursIfNeeded() {
+  if (!navigator.onLine || !spatial?.fetched_live || (spatial.contours_version || 0) >= 2) return;
+  const lot = (assessment?.lot_number || "").trim();
+  const plan = (assessment?.plan_label || "").trim().toUpperCase();
+  if (!lot || !plan || plan === "DP000000" || plan === "DP100000") return;
+  try {
+    const qs = new URLSearchParams({ lot, plan, fresh: "1", t: String(Date.now()) });
+    const r = await fetch(`/consulting/api/spatial/precheck?${qs.toString()}`, { cache: "no-store" });
+    if (!r.ok) return;
+    const freshData = await r.json();
+    if (freshData?.fetched_live) {
+      spatial = freshData;
+      renderSpatialOnMap();
+      recalculateAndRender();
+      showToast("Refreshed full-property NSW elevation contours.", "info", 2400);
+    }
+  } catch (_) {}
+}
+
 document.getElementById("btnRunGis").addEventListener("click", async () => {
   syncStateFromForm();
   const st = document.getElementById("gisStatus");
   st.textContent = "Querying live NSW Spatial Services...";
   try {
-    const qs = new URLSearchParams({ lot: assessment.lot_number, plan: assessment.plan_label });
-    const r = await fetch(`/consulting/api/spatial/precheck?${qs.toString()}`);
+    const qs = new URLSearchParams({ lot: assessment.lot_number, plan: assessment.plan_label, fresh: "1", t: String(Date.now()) });
+    const r = await fetch(`/consulting/api/spatial/precheck?${qs.toString()}`, { cache: "no-store" });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || data.error);
     spatial = data;
@@ -2362,6 +2381,7 @@ async function openJobFromD1(jobId) {
   renderSpatialOnMap();
   loadJobFiles(jobId);
   switchTab("panel-hub");
+  upgradeLegacySpatialContoursIfNeeded();
 }
 
 async function deleteJobFromD1(jobId, projectRef, applicantName, btnEl) {
@@ -2420,7 +2440,7 @@ async function saveActiveJobToD1() {
   const spatialForApi = spatial
     ? {
         ...spatial,
-        contours_geojson: (spatial.contours_geojson || []).slice(0, 100),
+        contours_geojson: (spatial.contours_geojson || []).slice(0, 150),
         neighbour_parcels_geojson: (spatial.neighbour_parcels_geojson || []).slice(0, 25),
         watercourses_geojson: (spatial.watercourses_geojson || []).slice(0, 45),
       }
@@ -3410,7 +3430,10 @@ async function boot() {
 
   hydrateFormFromState();
   initWbMap();
-  if (spatial) renderSpatialOnMap();
+  if (spatial) {
+    renderSpatialOnMap();
+    upgradeLegacySpatialContoursIfNeeded();
+  }
   refreshDashboard();
   flushOfflineSyncQueue();
 }

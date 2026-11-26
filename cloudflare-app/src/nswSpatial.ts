@@ -34,6 +34,7 @@ export interface SpatialPreCheckPayload {
   pre_site_flags: string[];
   warnings: string[];
   fetched_at: string;
+  contours_version?: number;
 }
 
 export interface GeoJsonFeature {
@@ -709,7 +710,8 @@ export async function runNswSpatialPrecheck(
   }
   if (contoursRes.status === "fulfilled") {
     // Clip multi-kilometre NSW contour lines to local parcel bbox BEFORE ~1.2 m Douglas-Peucker simplification
-    result.contours_geojson = clipAndCompactLineFeatures(contoursRes.value, clipBox, lon, lat, 120, 0.000011);
+    result.contours_geojson = clipAndCompactLineFeatures(contoursRes.value, clipBox, lon, lat, 160, 0.000012);
+    result.contours_version = 2;
   }
   if (zoningRes.status === "fulfilled") {
     result.land_zoning = uniqueLabels(zoningRes.value, ["SYM_CODE", "LAY_CLASS"]);

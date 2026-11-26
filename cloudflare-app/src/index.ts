@@ -220,22 +220,22 @@ function compactSpatialForD1(spatial: unknown): string | null {
   }
   s.neighbour_parcels_geojson = thinFeatures(s.neighbour_parcels_geojson, 25, 36);
   s.watercourses_geojson = thinFeatures(s.watercourses_geojson, 45, 70);
-  s.contours_geojson = thinFeatures(s.contours_geojson, 100, 70);
+  s.contours_geojson = thinFeatures(s.contours_geojson, 150, 70);
 
   let json = JSON.stringify(s);
-  if (json.length > 180_000) {
-    s.contours_geojson = thinFeatures(s.contours_geojson, 55, 45);
+  if (json.length > 220_000) {
+    s.contours_geojson = thinFeatures(s.contours_geojson, 90, 45);
     json = JSON.stringify(s);
   }
-  if (json.length > 180_000) {
+  if (json.length > 220_000) {
     s.contours_geojson = [];
     json = JSON.stringify(s);
   }
-  if (json.length > 180_000) {
+  if (json.length > 220_000) {
     s.neighbour_parcels_geojson = [];
     json = JSON.stringify(s);
   }
-  if (json.length > 180_000) {
+  if (json.length > 220_000) {
     s.watercourses_geojson = [];
     json = JSON.stringify(s);
   }
@@ -279,10 +279,11 @@ app.get("/consulting/api/spatial/precheck", async (c) => {
     return c.json({ error: "Query parameters 'lot' and 'plan' are required (e.g. ?lot=12&plan=DP123456)." }, 400);
   }
 
+  const fresh = c.req.query("fresh") === "1";
   try {
     const result = await runNswSpatialPrecheck(lot, plan, section);
     return c.json(result, 200, {
-      "Cache-Control": "public, max-age=1800",
+      "Cache-Control": fresh ? "no-store" : "public, max-age=120",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
