@@ -217,7 +217,7 @@ const pyPending = new Map();
 
 function getPyWorker() {
   if (!pyWorker) {
-    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=15");
+    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=21");
     pyWorker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === "status") {

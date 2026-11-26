@@ -42,7 +42,7 @@ async function initPyodide() {
 
   postMessage({ type: "status", message: "Mounting Field To Forest Python engine modules..." });
   for (const rel of PY_FILES) {
-    const resp = await fetch(`/consulting/py/${rel}`);
+    const resp = await fetch(`/consulting/py/${rel}?v=21`);
     if (!resp.ok) throw new Error(`Failed to fetch /consulting/py/${rel}`);
     const content = await resp.text();
     const parts = rel.split("/");
