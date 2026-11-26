@@ -219,9 +219,10 @@ const pinDetailVectorSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial,
   model: scRes,
   backdropMode: "vector",
 });
-assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (9 PINS)"), "Zoomed Pin Map missing title/legend");
+assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (9 PINS)"), "Feature Plan missing title/legend");
+assert.ok(!pinDetailVectorSvg.toUpperCase().includes("ZOOMED"), "Feature Plan title must not contain the word ZOOMED");
 const clippedCanvasSection = pinDetailVectorSvg.split('<g clip-path="url(#pinDetailClip)">')[1]?.split("</g>")[0] || "";
-assert.ok(!clippedCanvasSection.includes("MAIN DWELLING"), "Zoomed Pin Map must NOT place floating text labels on the map canvas");
+assert.ok(!clippedCanvasSection.includes("MAIN DWELLING"), "Feature Plan must NOT place floating text labels on the map canvas");
 assert.ok(
   pinDetailVectorSvg.includes("MAIN DWELLING") &&
     pinDetailVectorSvg.includes("2ND DWELLING") &&
@@ -230,7 +231,13 @@ assert.ok(
     pinDetailVectorSvg.includes("SEPTIC TANK") &&
     pinDetailVectorSvg.includes("REED BED") &&
     pinDetailVectorSvg.includes("BH1"),
-  "Zoomed Pin Map legend must display actual custom pin labels",
+  "Feature Plan legend must display actual custom pin labels",
+);
+assert.ok(
+  pinDetailVectorSvg.indexOf("MAIN DWELLING") < pinDetailVectorSvg.indexOf("2ND DWELLING") &&
+    pinDetailVectorSvg.indexOf("2ND DWELLING") < pinDetailVectorSvg.indexOf("ECO CABIN 1") &&
+    pinDetailVectorSvg.indexOf("ECO CABIN 1") < pinDetailVectorSvg.indexOf("FARM SHED"),
+  "Feature Plan legend must preserve exact pin sort order",
 );
 
 const pinDetailAerialSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {

@@ -1183,10 +1183,10 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
   if (!vp) {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#f8fafc; border:1px solid #cbd5e1; font-family:Inter,sans-serif;">
       <text x="${W / 2}" y="${H / 2 - 10}" text-anchor="middle" font-size="13.5" font-weight="800" fill="#143628">
-        ZOOMED INFRASTRUCTURE &amp; GPS FEATURE PLAN (${esc(drawingCode)})
+        INFRASTRUCTURE &amp; GPS FEATURE PLAN (${esc(drawingCode)})
       </text>
       <text x="${W / 2}" y="${H / 2 + 16}" text-anchor="middle" font-size="10.5" fill="#52635c">
-        Place one or more GPS pins on the Interactive Map Studio to generate this zoomed site features plan.
+        Place one or more GPS pins on the Interactive Map Studio to generate this site features plan.
       </text>
     </svg>`;
   }
@@ -1400,7 +1400,7 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
     </defs>
 
     <text x="${W / 2}" y="26" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
-      ZOOMED INFRASTRUCTURE &amp; GPS FEATURE PLAN — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
+      INFRASTRUCTURE &amp; GPS FEATURE PLAN — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
     </text>
 
     <!-- Map Canvas -->
@@ -1459,7 +1459,7 @@ export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
     <line x1="${mapX + 286}" y1="468" x2="${mapX + 286}" y2="542" stroke="#143628" stroke-width="0.9" />
     <line x1="${mapX + 544}" y1="468" x2="${mapX + 544}" y2="542" stroke="#143628" stroke-width="0.9" />
 
-    <text x="${mapX + 10}" y="485" font-size="8.5" font-weight="800" fill="#143628">ZOOMED DETAIL EXTENT</text>
+    <text x="${mapX + 10}" y="485" font-size="8.5" font-weight="800" fill="#143628">DETAIL PLAN EXTENT</text>
     <text x="${mapX + 10}" y="502" font-size="8.5" fill="#1e293b">Site: ${esc(inp.site_address)}</text>
     <text x="${mapX + 10}" y="517" font-size="8.5" fill="#1e293b">Lot/DP: Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}  |  Zone: ${esc(zoningStr)}</text>
     <text x="${mapX + 10}" y="532" font-size="8.0" fill="#334155">Pins plotted at exact GDA2020 GPS coordinates (see schedule)</text>

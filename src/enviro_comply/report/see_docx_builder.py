@@ -91,7 +91,9 @@ def build_see_docx_report(
     r_co.bold = True
     r_co.font.size = Pt(13.5)
     r_co.font.color.rgb = NAVY
-    bits = [inp.consultant.qualification, f"Lic: {inp.consultant.licence_number}" if inp.consultant.licence_number else None, inp.consultant.email, inp.consultant.postal_address]
+    raw_lic = (inp.consultant.licence_number or "").strip()
+    valid_lic = raw_lic if raw_lic and raw_lic.upper() != "FTF-NSW" else None
+    bits = [inp.consultant.qualification, f"Lic: {valid_lic}" if valid_lic else None, inp.consultant.email, inp.consultant.postal_address]
     r_sub = p_hdr.add_run("  |  ".join([b for b in bits if b]))
     r_sub.font.size = Pt(8.5)
     r_sub.font.color.rgb = MUTED
@@ -253,11 +255,11 @@ def build_see_docx_report(
     )
 
     if (pin_map_png and pin_map_png.exists()) or field_pins:
-        _add_heading(doc, "2.1 Zoomed Site Features & Proposed Works Extent Plan (Drawing SEE-GIS-02)", level=2)
+        _add_heading(doc, "2.1 Site Features & Proposed Works Plan (Drawing SEE-GIS-02)", level=2)
         _add_figure(
             doc,
             pin_map_png,
-            "Figure 2: Zoomed GDA2020 / MGA Zone 56 Exact GPS Feature Plan (Drawing SEE-GIS-02). Features are identified by the symbol legend and coordinate schedule below.",
+            "Figure 2: GDA2020 / MGA Zone 56 Exact GPS Feature Plan (Drawing SEE-GIS-02). Features are identified by the symbol legend and coordinate schedule below.",
             width_in=6.5,
         )
         if field_pins:
@@ -471,7 +473,7 @@ def build_see_docx_report(
     p_cert.paragraph_format.space_before = Pt(12)
     rc = p_cert.add_run(
         f"Prepared By: {inp.consultant.name} ({inp.consultant.qualification}"
-        + (f", Lic. {inp.consultant.licence_number}" if inp.consultant.licence_number else "")
+        + (f", Lic. {valid_lic}" if valid_lic else "")
         + f")   |   Date: {inp.assessment_date.strftime('%d %B %Y')}"
     )
     rc.bold = True

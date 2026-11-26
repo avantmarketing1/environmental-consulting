@@ -445,7 +445,7 @@ app.post("/consulting/api/enquiries/:id/convert", async (c) => {
     consultant: {
       name: "Field To Forest Environmental Consulting",
       qualification: "Accredited Wastewater Consultant (Northern Rivers NSW)",
-      licence_number: "FTF-NSW",
+      licence_number: null,
       company: "Field To Forest",
       phone: "",
       email: "consulting@fieldtoforestfarm.com",

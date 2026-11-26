@@ -1128,6 +1128,36 @@ select optgroup {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   font-size: 0.76rem;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease, transform 0.12s ease;
+}
+.pin-card[draggable="true"] {
+  cursor: grab;
+}
+.pin-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+.pin-card.dragging {
+  opacity: 0.45;
+  border-style: dashed;
+}
+.pin-card.drag-over {
+  border-color: var(--ochre-600);
+  box-shadow: 0 0 0 2px rgba(194, 89, 12, 0.28);
+  background: var(--forest-50);
+  transform: translateY(-1px);
+}
+.pin-drag-handle {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  padding: 2px 3px 2px 0;
+  flex-shrink: 0;
+}
+.pin-card:hover .pin-drag-handle {
+  color: var(--heading);
 }
 .pin-card-main {
   display: flex;

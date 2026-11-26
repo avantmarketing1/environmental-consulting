@@ -217,7 +217,7 @@ const pyPending = new Map();
 
 function getPyWorker() {
   if (!pyWorker) {
-    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=21");
+    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=22");
     pyWorker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === "status") {
@@ -568,7 +568,7 @@ function createBlankAssessment() {
     consultant: {
       name: "Field To Forest Environmental Consulting",
       qualification: "Accredited Wastewater Consultant (Northern Rivers NSW)",
-      licence_number: "FTF-NSW",
+      licence_number: null,
       company: "Field To Forest",
       phone: "",
       email: "consulting@fieldtoforestfarm.com",
@@ -597,6 +597,9 @@ function populateSelects() {
 
 function hydrateFormFromState() {
   const a = assessment;
+  if (a?.consultant?.licence_number && String(a.consultant.licence_number).trim().toUpperCase() === "FTF-NSW") {
+    a.consultant.licence_number = null;
+  }
   const se = a.site_eval;
   document.getElementById("fProjectRef").value = a.project_ref || "";
   document.getElementById("fDate").value = se.assessment_date || new Date().toISOString().slice(0, 10);
@@ -1851,13 +1854,14 @@ function renderMapPins() {
 
   listEl.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-      <strong style="color:var(--heading);">Placed Site Pins (${pins.length}) — click to zoom/edit or drag on map:</strong>
+      <strong style="color:var(--heading);">Placed Site Pins (${pins.length}) — drag cards to set plan legend order, click to edit:</strong>
       <button type="button" id="btnClearAllPins" class="btn btn-danger-outline btn-sm" style="padding:2px 8px; font-size:0.72rem;">Clear All Pins</button>
     </div>
-    <div class="pin-manager-list">
+    <div class="pin-manager-list" id="pinManagerList">
       ${pins.map((p, idx) => `
-        <div class="pin-card">
-          <div class="pin-card-main" data-zoom-pin="${idx}" title="Click to pan &amp; open editor">
+        <div class="pin-card" draggable="true" data-pin-idx="${idx}">
+          <div class="pin-card-main" data-zoom-pin="${idx}" title="Drag to reorder legend · Click to pan &amp; open editor">
+            <span class="pin-drag-handle" aria-hidden="true">⋮⋮</span>
             ${renderPinMarkerSvg(p.feature_type, 24)}
             <div style="min-width:0;">
               <div class="pin-card-title">${escHtml(p.label)}</div>
@@ -1873,6 +1877,46 @@ function renderMapPins() {
     </div>
     ${setbackBanner}
   `;
+
+  // Drag-and-drop pin reordering (directly controls Feature Legend & Coordinate Schedule sort order!)
+  let draggedPinIdx = null;
+  listEl.querySelectorAll(".pin-card[draggable='true']").forEach((card) => {
+    card.addEventListener("dragstart", (e) => {
+      draggedPinIdx = Number(card.dataset.pinIdx);
+      card.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(draggedPinIdx));
+      }
+    });
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      if (Number(card.dataset.pinIdx) !== draggedPinIdx) {
+        card.classList.add("drag-over");
+      }
+    });
+    card.addEventListener("dragleave", () => {
+      card.classList.remove("drag-over");
+    });
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.classList.remove("drag-over");
+      const toIdx = Number(card.dataset.pinIdx);
+      const fromIdx = draggedPinIdx != null ? draggedPinIdx : Number(e.dataTransfer?.getData("text/plain"));
+      if (!Number.isInteger(fromIdx) || !Number.isInteger(toIdx) || fromIdx === toIdx) return;
+      if (fromIdx < 0 || fromIdx >= assessment.field_pins.length || toIdx < 0 || toIdx >= assessment.field_pins.length) return;
+      const [moved] = assessment.field_pins.splice(fromIdx, 1);
+      assessment.field_pins.splice(toIdx, 0, moved);
+      renderMapPins();
+      syncStateFromForm();
+      showToast(`Reordered "${moved.label}" in plan legend.`, "info", 1800);
+    });
+    card.addEventListener("dragend", () => {
+      draggedPinIdx = null;
+      listEl.querySelectorAll(".pin-card").forEach((c) => c.classList.remove("dragging", "drag-over"));
+    });
+  });
 
   listEl.querySelectorAll("[data-zoom-pin], [data-edit-pin]").forEach((el) => {
     el.addEventListener("click", () => {
@@ -2716,7 +2760,7 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
     ] = await Promise.all([
       rasterizeSvgToPngArrayBuffer(renderCadLayoutSvg(assessment, lastModel), "CAD Layout"),
       rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: lastModel }), "GIS Site Map"),
-      pinDetailSvg ? rasterizeSvgToPngArrayBuffer(pinDetailSvg, "Zoomed GPS Feature Plan") : Promise.resolve(null),
+      pinDetailSvg ? rasterizeSvgToPngArrayBuffer(pinDetailSvg, "Infrastructure & GPS Feature Plan") : Promise.resolve(null),
       rasterizeSvgToPngArrayBuffer(renderTreatmentTrainSvg(assessment, lastModel), "Treatment Train"),
       rasterizeSvgToPngArrayBuffer(renderSizingAndWaterBalanceSvg(assessment, lastModel), "Sizing & Water Balance Chart"),
       (assessment.boreholes || []).length ? rasterizeSvgToPngArrayBuffer(renderBoreholeProfileSvg(assessment, lastModel, lastAudit), "Borehole Soil Profile") : Promise.resolve(null),
@@ -3288,7 +3332,7 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
   btn.disabled = true;
   if (prog) prog.classList.add("active");
   try {
-    logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)${computePinMapViewport(assessment, spatial) ? " & Zoomed Feature Plan (SEE-GIS-02)" : ""}...`;
+    logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)${computePinMapViewport(assessment, spatial) ? " & Site Features Plan (SEE-GIS-02)" : ""}...`;
     const hasSeePins = Boolean(computePinMapViewport(assessment, spatial));
     const seePinSvg = hasSeePins ? await buildPinDetailSvgWithBackdrop("SEE-GIS-02", "DA SUBMISSION") : null;
     const [gisPngBytes, pinMapPngBytes] = await Promise.all([
@@ -3296,7 +3340,7 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
         renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel }),
         "SEE GIS Site Map",
       ),
-      seePinSvg ? rasterizeSvgToPngArrayBuffer(seePinSvg, "SEE Zoomed GPS Feature Plan") : Promise.resolve(null),
+      seePinSvg ? rasterizeSvgToPngArrayBuffer(seePinSvg, "SEE Site Features & GPS Plan") : Promise.resolve(null),
     ]);
     const photosPayload = localPhotos.map((p) => ({
       caption: p.caption,

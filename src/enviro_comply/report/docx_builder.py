@@ -152,9 +152,11 @@ def build_ossm_docx_report(
     r_co.bold = True
     r_co.font.size = Pt(13.5)
     r_co.font.color.rgb = NAVY
+    raw_lic = (inp.consultant.licence_number or "").strip()
+    valid_lic = raw_lic if raw_lic and raw_lic.upper() != "FTF-NSW" else None
     contact_bits = [
         inp.consultant.qualification,
-        f"Lic: {inp.consultant.licence_number}" if inp.consultant.licence_number else None,
+        f"Lic: {valid_lic}" if valid_lic else None,
         inp.consultant.phone,
         inp.consultant.email,
         inp.consultant.postal_address,
@@ -358,7 +360,7 @@ def build_ossm_docx_report(
     else:
         doc.add_paragraph(
             f"At the request of {inp.applicant_name}, {inp.consultant.name} ({inp.consultant.qualification}"
-            + (f", Licence {inp.consultant.licence_number}" if inp.consultant.licence_number else "")
+            + (f", Licence {valid_lic}" if valid_lic else "")
             + f") conducted a desktop GIS pre-check and on-site soil and land capability assessment on "
             f"{se.assessment_date.strftime('%d %B %Y')} at {inp.site_address} (Lot {inp.lot_number} {inp.plan_label}). "
             f"The allotment comprises {mo_line}. Weather conditions at inspection were recorded as '{se.recent_weather}'."
@@ -413,11 +415,11 @@ def build_ossm_docx_report(
 
     pin_detail_path = diagrams.get("pin_detail_map")
     if (pin_detail_path and pin_detail_path.exists()) or inp.field_pins:
-        _add_heading(doc, "3.2 Zoomed OSSM Infrastructure & GPS Feature Plan (Drawing OSSM-GIS-02)", level=2)
+        _add_heading(doc, "3.2 OSSM Infrastructure & GPS Feature Plan (Drawing OSSM-GIS-02)", level=2)
         if _add_figure(
             doc,
             pin_detail_path,
-            f"Figure {fig_num}: Zoomed GDA2020 / MGA Zone 56 Infrastructure & Exact GPS Feature Plan (Drawing OSSM-GIS-02). "
+            f"Figure {fig_num}: GDA2020 / MGA Zone 56 Infrastructure & Exact GPS Feature Plan (Drawing OSSM-GIS-02). "
             f"Features are plotted at their exact recorded GDA2020 coordinates and identified via the companion legend and coordinate schedule below.",
             width_in=6.5,
         ):
@@ -1005,7 +1007,7 @@ def build_ossm_docx_report(
     p_cert.paragraph_format.space_before = Pt(8)
     rc = p_cert.add_run(
         f"Prepared & Certified By: {inp.consultant.name}  ({inp.consultant.qualification}"
-        + (f", Lic. {inp.consultant.licence_number}" if inp.consultant.licence_number else "")
+        + (f", Lic. {valid_lic}" if valid_lic else "")
         + f")   |   Date: {se.assessment_date.strftime('%d %B %Y')}"
     )
     rc.bold = True

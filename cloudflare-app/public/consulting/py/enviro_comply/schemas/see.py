@@ -90,7 +90,7 @@ class SEEAssessmentInput(BaseModel):
         default_factory=lambda: ConsultantDetails(
             name="Field To Forest Environmental Consulting",
             qualification="Environmental & Planning Consultant (Northern Rivers NSW)",
-            licence_number="FTF-NSW",
+            licence_number=None,
             company="Field To Forest",
             email="consulting@fieldtoforestfarm.com",
             postal_address="Lismore NSW 2480",
