@@ -182,6 +182,8 @@ def generate_see_package(
     see_json_str,
     spatial_json_str,
     gis_png_bytes=None,
+    pin_map_png_bytes=None,
+    field_pins_json_str="",
     photos_js=None,
 ):
     inp = SEEAssessmentInput.model_validate_json(see_json_str)
@@ -222,6 +224,14 @@ def generate_see_package(
         gis_png_path = Path("/tmp/see_gis_map.png")
         gis_png_path.write_bytes(b_gis)
 
+    pin_map_path = None
+    b_pin = _to_bytes(pin_map_png_bytes)
+    if b_pin:
+        pin_map_path = Path("/tmp/see_pin_map.png")
+        pin_map_path.write_bytes(b_pin)
+
+    field_pins = json.loads(field_pins_json_str) if field_pins_json_str else []
+
     photo_items = []
     if photos_js is not None:
         ph_list = photos_js.to_py() if hasattr(photos_js, "to_py") else list(photos_js)
@@ -236,13 +246,22 @@ def generate_see_package(
                 photo_items.append((p, str(item.get("caption") or f"Site Photo {idx + 1}")))
 
     docx_path = Path("/tmp/lismore_see_report.docx")
-    build_see_docx_report(inp, spatial, audit, docx_path, gis_map_png=gis_png_path, photo_items=photo_items)
+    build_see_docx_report(
+        inp,
+        spatial,
+        audit,
+        docx_path,
+        gis_map_png=gis_png_path,
+        pin_map_png=pin_map_path,
+        field_pins=field_pins,
+        photo_items=photo_items,
+    )
     docx_bytes = docx_path.read_bytes()
 
     return {
         "audit_json": audit.model_dump_json(),
         "docx_bytes": docx_bytes,
-        "embedded_count": int(bool(gis_png_path)) + len(photo_items),
+        "embedded_count": int(bool(gis_png_path)) + int(bool(pin_map_path)) + len(photo_items),
     }
 `);
 
@@ -319,6 +338,8 @@ self.onmessage = async (event) => {
         JSON.stringify(payload.seeInput),
         payload.spatial ? JSON.stringify(payload.spatial) : "",
         payload.gisPngBytes ? new Uint8Array(payload.gisPngBytes) : null,
+        payload.pinMapPngBytes ? new Uint8Array(payload.pinMapPngBytes) : null,
+        payload.fieldPins ? JSON.stringify(payload.fieldPins) : "",
         photoList,
       );
       const docxBytes = resProxy.get("docx_bytes").toJs();

@@ -19,6 +19,7 @@ const { loadLismoreDatasets, runLismoreModelJS, auditLismoreComplianceJS, render
 );
 const {
   PIN_FEATURE_SPECS,
+  computePinMapViewport,
   renderBoreholeProfileSvg,
   renderTreatmentTrainSvg,
   renderSepticCrossSectionSvg,
@@ -26,6 +27,7 @@ const {
   renderEtaCrossSectionSvg,
   renderSdiCrossSectionSvg,
   renderSizingAndWaterBalanceSvg,
+  renderGisPinDetailMapSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
   renderPinMarkerSvg,
@@ -163,67 +165,76 @@ const etaXsecSvg = renderEtaCrossSectionSvg(sc, scRes, scAudit);
 assert.ok(etaXsecSvg.includes("GYPSUM") || etaXsecSvg.includes("Gypsum"), "ETA XSec SVG should show gypsum amelioration for Class 3/4");
 const sdiXsecSvg = renderSdiCrossSectionSvg(sdi4, sdiRes);
 assert.ok(sdiXsecSvg.includes("558.7 m²") || sdiXsecSvg.includes("1,800 L"), "SDI XSec SVG missing key design details");
-const gisSvg = renderGisSiteMapSvg(
-  {
-    ...sc,
-    field_pins: [
-      { label: "MAIN DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
-      { label: "SEPTIC TANK", feature_type: "septic_tank", latitude: -28.58125, longitude: 153.20128 },
-      { label: "REED BED", feature_type: "reed_bed", latitude: -28.5813, longitude: 153.20135 },
-      { label: "ETA BED / LAA", feature_type: "eta_bed", latitude: -28.58136, longitude: 153.20142, rotation_deg: 25 },
-      { label: "RESERVE LAA", feature_type: "reserve_laa", latitude: -28.58145, longitude: 153.20148 },
-      { label: "BH1", feature_type: "borehole", latitude: -28.58138, longitude: 153.20138 },
-    ],
+const pinnedSample = {
+  ...sc,
+  field_pins: [
+    { label: "MAIN DWELLING", feature_type: "dwelling", latitude: -28.5812, longitude: 153.2012 },
+    { label: "SEPTIC TANK", feature_type: "septic_tank", latitude: -28.58125, longitude: 153.20128 },
+    { label: "REED BED", feature_type: "reed_bed", latitude: -28.5813, longitude: 153.20135 },
+    { label: "ETA BED / LAA", feature_type: "eta_bed", latitude: -28.58136, longitude: 153.20142, rotation_deg: 25 },
+    { label: "RESERVE LAA", feature_type: "reserve_laa", latitude: -28.58145, longitude: 153.20148 },
+    { label: "BH1", feature_type: "borehole", latitude: -28.58138, longitude: 153.20138 },
+  ],
+};
+const sampleSpatial = {
+  fetched_live: true,
+  lot_id_string: "1//DP100000",
+  parcel_area_ha: 8.46,
+  centroid_easting_mga56: 520123,
+  centroid_northing_mga56: 6838456,
+  drinking_water_catchment: true,
+  parcel_geojson: {
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]],
+    },
   },
-  {
-    fetched_live: true,
-    lot_id_string: "1//DP100000",
-    parcel_area_ha: 8.46,
-    centroid_easting_mga56: 520123,
-    centroid_northing_mga56: 6838456,
-    drinking_water_catchment: true,
-    parcel_geojson: {
+  watercourses_geojson: [
+    {
       type: "Feature",
       geometry: {
-        type: "Polygon",
-        coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]],
+        type: "LineString",
+        coordinates: [[153.199, -28.581], [153.204, -28.582]],
       },
     },
-    watercourses_geojson: [
-      {
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: [[153.199, -28.581], [153.204, -28.582]],
-        },
-      },
-    ],
-  },
-  { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: scRes },
-);
+  ],
+};
+
+// Map 1: Whole-Parcel Locality & Constraints Map (clean — NO pin markers, shows dashed Detail Area indicator box)
+const gisSvg = renderGisSiteMapSvg(pinnedSample, sampleSpatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: scRes });
 assert.ok(gisSvg.includes("OSSM-GIS-01") && gisSvg.includes("DP100000"), "GIS Site Map SVG missing title block / Lot DP");
-assert.ok(gisSvg.includes("GPS Field Pins (6)") && gisSvg.includes("ROUS WATER"), "GIS Site Map SVG should plot all 6 clustered pins and active overlays");
-assert.ok(gisSvg.includes("MAIN DWELLING") && gisSvg.includes("SEPTIC TANK") && gisSvg.includes("REED BED"), "GIS Site Map SVG should render custom callout pills");
+assert.ok(gisSvg.includes("DETAIL AREA — SEE OSSM-GIS-02") && gisSvg.includes("ROUS WATER"), "Whole-lot GIS map should show Detail Area box & active overlays");
+assert.ok(!gisSvg.includes("MAIN DWELLING"), "Whole-lot GIS map should NOT clutter the parcel with pin text labels");
+
+// Map 2: Zoomed Exact-GPS Pin & Infrastructure Plan (Vector & Aerial Backdrop modes, zero text labels, dedicated side legend)
+const vp = computePinMapViewport(pinnedSample, sampleSpatial);
+assert.ok(vp && vp.pins.length === 6 && vp.targetWM >= 58, "Zoomed pin viewport should frame all 6 pins tightly");
+const pinDetailVectorSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {
+  drawingCode: "OSSM-GIS-02",
+  submissionLabel: "S68 SUBMISSION",
+  model: scRes,
+  backdropMode: "vector",
+});
+assert.ok(pinDetailVectorSvg.includes("OSSM-GIS-02") && pinDetailVectorSvg.includes("FEATURE LEGEND (6 PINS)"), "Zoomed Pin Map missing title/legend");
+assert.ok(!pinDetailVectorSvg.includes("MAIN DWELLING"), "Zoomed Pin Map must NOT place floating text labels on pins");
+assert.ok(pinDetailVectorSvg.includes("Dwelling / Building") && pinDetailVectorSvg.includes("Septic Tank") && pinDetailVectorSvg.includes("Reed Bed"), "Zoomed Pin Map legend must identify every feature type");
+
+const pinDetailAerialSvg = renderGisPinDetailMapSvg(pinnedSample, sampleSpatial, {
+  drawingCode: "OSSM-GIS-02",
+  submissionLabel: "S68 SUBMISSION",
+  model: scRes,
+  backdropMode: "aerial",
+  aerialDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+  aerialAttribution: "NSW Spatial Services (SIX Maps) Aerial",
+});
+assert.ok(pinDetailAerialSvg.includes('href="data:image/jpeg;base64,') && pinDetailAerialSvg.includes("SIX Maps"), "Aerial backdrop mode should embed stitched aerial data URL");
+
 // Verify all custom SVG pin marker symbols are strict valid SVG
 for (const ft of Object.keys(PIN_FEATURE_SPECS)) {
   const mSvg = renderPinMarkerSvg(ft, 28);
   assert.ok(mSvg.startsWith("<svg") && mSvg.endsWith("</svg>"), `Pin marker SVG invalid for ${ft}`);
   assert.ok(!/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.test(mSvg), `Unescaped '&' in pin SVG for ${ft}`);
-}
-// Verify zero overlapping callout pill rectangles on clustered GIS pins
-const labelRects = [...gisSvg.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)" height="16\.0" rx="3\.5"/g)].map((m) => ({
-  x1: Number(m[1]),
-  y1: Number(m[2]),
-  x2: Number(m[1]) + Number(m[3]),
-  y2: Number(m[2]) + 16,
-}));
-assert.equal(labelRects.length, 6, "Expected 6 placed callout pill rects for 6 clustered pins");
-for (let i = 0; i < labelRects.length; i++) {
-  for (let j = i + 1; j < labelRects.length; j++) {
-    const a = labelRects[i], b = labelRects[j];
-    const overlap = !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
-    assert.equal(overlap, false, `Callout pills ${i} and ${j} overlapped on clustered GIS map`);
-  }
 }
 const seeGisSvg = renderGisSiteMapSvg(sc, { fetched_live: true, parcel_geojson: { type: "Feature", geometry: { type: "Polygon", coordinates: [[[153.2, -28.58], [153.203, -28.58], [153.203, -28.583], [153.2, -28.583], [153.2, -28.58]]] } } }, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION" });
 assert.ok(seeGisSvg.includes("SEE-GIS-01") && seeGisSvg.includes("DA SUBMISSION"), "SEE GIS SVG should use SEE-GIS-01 title block");
@@ -283,6 +294,8 @@ const allSvgs = {
   sizingChart: sizingSvg,
   boreholeProfile: bhSvg,
   gisMap: gisSvg,
+  pinDetailVector: pinDetailVectorSvg,
+  pinDetailAerial: pinDetailAerialSvg,
   seeGisMap: seeGisSvg,
 };
 for (const [name, content] of Object.entries(allSvgs)) {

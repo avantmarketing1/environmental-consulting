@@ -411,6 +411,31 @@ def build_ossm_docx_report(
     ):
         fig_num += 1
 
+    pin_detail_path = diagrams.get("pin_detail_map")
+    if (pin_detail_path and pin_detail_path.exists()) or inp.field_pins:
+        _add_heading(doc, "3.2 Zoomed OSSM Infrastructure & GPS Feature Plan (Drawing OSSM-GIS-02)", level=2)
+        if _add_figure(
+            doc,
+            pin_detail_path,
+            f"Figure {fig_num}: Zoomed GDA2020 / MGA Zone 56 Infrastructure & Exact GPS Feature Plan (Drawing OSSM-GIS-02). "
+            f"Features are plotted at their exact recorded GDA2020 coordinates and identified via the companion legend and coordinate schedule below.",
+            width_in=6.5,
+        ):
+            fig_num += 1
+        if inp.field_pins:
+            pin_rows = []
+            for fp in inp.field_pins:
+                ft_label = fp.feature_type.replace("_", " ").title()
+                e_str = f"{fp.easting_mga56:,.1f}" if fp.easting_mga56 is not None else "—"
+                n_str = f"{fp.northing_mga56:,.1f}" if fp.northing_mga56 is not None else "—"
+                ll_str = f"{fp.latitude:.5f}, {fp.longitude:.5f}" if (fp.latitude is not None and fp.longitude is not None) else "—"
+                pin_rows.append([fp.label, ft_label, e_str, n_str, ll_str])
+            _add_grid_table(
+                doc,
+                ["Feature Label", "Type", "MGA56 Easting (E)", "MGA56 Northing (N)", "WGS84 Lat / Lon"],
+                pin_rows,
+            )
+
     doc.add_page_break()
 
     # =========================================================================

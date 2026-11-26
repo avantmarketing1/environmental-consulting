@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=14" />
+  <link rel="stylesheet" href="/consulting/styles/ftf.css?v=15" />
   <script>
     // Apply saved theme immediately before paint to prevent light/dark flash
     (function () {
@@ -653,8 +653,18 @@
               </div>
               <div class="grid-2" style="gap:14px;">
                 <div>
-                  <div class="kpi-label" style="margin-bottom:4px;">Section 3 — GDA2020 GIS Site Location Map (OSSM-GIS-01)</div>
-                  <div class="drawing-frame" id="prevGisMap" data-zoom-title="GDA2020 GIS Site Location Map (OSSM-GIS-01)"></div>
+                  <div class="kpi-label" style="margin-bottom:4px;">Section 3 — Whole-Lot Site Location &amp; Constraints Map (OSSM-GIS-01)</div>
+                  <div class="drawing-frame" id="prevGisMap" data-zoom-title="Whole-Lot GIS Site Location Map (OSSM-GIS-01)"></div>
+                </div>
+                <div id="prevPinMapWrap">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:4px;">
+                    <div class="kpi-label">Section 3.2 — Zoomed GPS Feature Plan (OSSM-GIS-02)</div>
+                    <div class="map-basemap-bar" data-pin-backdrop-group role="group" aria-label="Zoomed map backdrop style">
+                      <button type="button" class="basemap-btn active" data-pin-backdrop="vector">Vector GIS</button>
+                      <button type="button" class="basemap-btn" data-pin-backdrop="aerial">Aerial Backdrop</button>
+                    </div>
+                  </div>
+                  <div class="drawing-frame" id="prevPinMap" data-zoom-title="Zoomed OSSM Infrastructure & GPS Feature Plan (OSSM-GIS-02)"></div>
                 </div>
                 <div>
                   <div class="kpi-label" style="margin-bottom:4px;">Section 5 — Stratigraphic Borehole Profile</div>
@@ -807,9 +817,24 @@
 
           <details open style="margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:12px 16px; background:var(--surface-alt);">
             <summary style="cursor:pointer; font-weight:700; color:var(--heading); font-size:0.93rem;">
-              Preview Embedded GIS Site Location Map (SEE-GIS-01)
+              Preview Embedded GIS Maps Included in Compiled SEE .DOCX (SEE-GIS-01 &amp; SEE-GIS-02)
             </summary>
-            <div style="margin-top:12px;" class="drawing-frame" id="prevSeeGisMap"></div>
+            <div class="grid-2" style="gap:14px; margin-top:12px;">
+              <div>
+                <div class="kpi-label" style="margin-bottom:4px;">Section 2 — Whole-Lot Site Location Map (SEE-GIS-01)</div>
+                <div class="drawing-frame" id="prevSeeGisMap" data-zoom-title="Whole-Lot SEE GIS Site Location Map (SEE-GIS-01)"></div>
+              </div>
+              <div id="prevSeePinMapWrap">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:4px;">
+                  <div class="kpi-label">Section 2.1 — Zoomed GPS Feature Plan (SEE-GIS-02)</div>
+                  <div class="map-basemap-bar" data-pin-backdrop-group role="group" aria-label="SEE zoomed map backdrop style">
+                    <button type="button" class="basemap-btn active" data-pin-backdrop="vector">Vector GIS</button>
+                    <button type="button" class="basemap-btn" data-pin-backdrop="aerial">Aerial Backdrop</button>
+                  </div>
+                </div>
+                <div class="drawing-frame" id="prevSeePinMap" data-zoom-title="Zoomed SEE Site Features & Works Plan (SEE-GIS-02)"></div>
+              </div>
+            </div>
           </details>
         </div>
 
@@ -919,6 +944,6 @@
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script type="module" src="/consulting/app/app.js?v=14"></script>
+  <script type="module" src="/consulting/app/app.js?v=15"></script>
 </body>
 </html>

@@ -8,8 +8,10 @@ import {
 } from "./lismore-engine.js";
 import {
   PIN_FEATURE_SPECS,
+  computePinMapViewport,
   renderBoreholeProfileSvg,
   renderEtaCrossSectionSvg,
+  renderGisPinDetailMapSvg,
   renderGisSiteMapSvg,
   renderGreaseArrestorCrossSectionSvg,
   renderPinMarkerSvg,
@@ -70,6 +72,8 @@ let wbParcelBounds = null;
 let activeBasemap = localStorage.getItem("ftf_basemap") || "satellite";
 let measureModeActive = false;
 let measurePoints = [];
+const aerialBackdropCache = new Map();
+let pinMapPreviewSeq = 0;
 
 // ============================================================================
 // NON-BLOCKING TOASTS, STYLED CONFIRM MODAL, LIGHTBOX & SAVE STATE UI
@@ -213,7 +217,7 @@ const pyPending = new Map();
 
 function getPyWorker() {
   if (!pyWorker) {
-    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=12");
+    pyWorker = new Worker("/consulting/app/pyodide-worker.js?v=15");
     pyWorker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === "status") {
@@ -476,6 +480,7 @@ function createBlankAssessment() {
     block_size_m2: 10000,
     development_description: "Combined Secondary On-Site Wastewater Treatment and Disposal System",
     development_category: "single_dwelling",
+    pin_map_backdrop: "vector",
     deliverables: { ossm: true, see: true },
     project_brief: "",
     wastewater_sources: [],
@@ -916,10 +921,167 @@ function renderReadinessBars() {
   }
 }
 
+function getPinMapBackdropMode() {
+  return assessment?.pin_map_backdrop === "aerial" ? "aerial" : "vector";
+}
+
+function syncPinBackdropButtons() {
+  const mode = getPinMapBackdropMode();
+  document.querySelectorAll("[data-pin-backdrop]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.pinBackdrop === mode);
+  });
+}
+
+document.querySelectorAll("[data-pin-backdrop]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!assessment) return;
+    assessment.pin_map_backdrop = btn.dataset.pinBackdrop === "aerial" ? "aerial" : "vector";
+    syncPinBackdropButtons();
+    syncStateFromForm();
+    if (assessment.pin_map_backdrop === "aerial") {
+      showToast("Switched zoomed pin plan to Aerial Imagery backdrop.", "info", 2200);
+    }
+  });
+});
+
+function loadCorsImage(url, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    img.src = url;
+  });
+}
+
+/**
+ * Stitches CORS-enabled Esri / NSW SIX Maps aerial tiles into a crisp 2x retina JPEG data URL
+ * aligned to exact Web Mercator coordinates of computePinMapViewport().
+ */
+async function captureAerialBackdropDataUrl(vp) {
+  if (!vp || !navigator.onLine) return null;
+  const preferNsw = activeBasemap === "nsw_aerial";
+  const providers = preferNsw
+    ? [
+        {
+          id: "nsw_aerial",
+          label: "NSW Spatial Services (SIX Maps) Aerial",
+          maxZoom: 20,
+          url: (z, x, y) => `https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/${z}/${y}/${x}`,
+        },
+        {
+          id: "esri_satellite",
+          label: "Esri World Imagery",
+          maxZoom: 19,
+          url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+        },
+      ]
+    : [
+        {
+          id: "esri_satellite",
+          label: "Esri World Imagery",
+          maxZoom: 19,
+          url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+        },
+        {
+          id: "nsw_aerial",
+          label: "NSW Spatial Services (SIX Maps) Aerial",
+          maxZoom: 20,
+          url: (z, x, y) => `https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/${z}/${y}/${x}`,
+        },
+      ];
+
+  for (const prov of providers) {
+    const z = Math.min(prov.maxZoom, vp.zoom);
+    const key = `${prov.id}:${z}:${vp.mercMinX.toFixed(7)}:${vp.mercMaxX.toFixed(7)}:${vp.mercMinY.toFixed(7)}:${vp.mercMaxY.toFixed(7)}`;
+    if (aerialBackdropCache.has(key)) return aerialBackdropCache.get(key);
+
+    const nTiles = 2 ** z;
+    const minTx = Math.floor(vp.mercMinX * nTiles);
+    const maxTx = Math.floor(vp.mercMaxX * nTiles);
+    const minTy = Math.floor(vp.mercMinY * nTiles);
+    const maxTy = Math.floor(vp.mercMaxY * nTiles);
+
+    const tileJobs = [];
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      for (let ty = minTy; ty <= maxTy; ty++) {
+        tileJobs.push({ tx, ty, promise: loadCorsImage(prov.url(z, tx, ty)) });
+      }
+    }
+    const loaded = await Promise.all(tileJobs.map(async (j) => ({ ...j, img: await j.promise })));
+    const okTiles = loaded.filter((t) => t.img);
+    if (!okTiles.length) continue;
+
+    try {
+      const scaleOut = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(vp.mapW * scaleOut);
+      canvas.height = Math.round(vp.mapH * scaleOut);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#1a2420";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const spanX = vp.mercMaxX - vp.mercMinX;
+      const spanY = vp.mercMaxY - vp.mercMinY;
+      for (const t of okTiles) {
+        const tMinX = t.tx / nTiles;
+        const tMaxX = (t.tx + 1) / nTiles;
+        const tMinY = t.ty / nTiles;
+        const tMaxY = (t.ty + 1) / nTiles;
+        const dx = ((tMinX - vp.mercMinX) / spanX) * canvas.width;
+        const dy = ((tMinY - vp.mercMinY) / spanY) * canvas.height;
+        const dw = ((tMaxX - tMinX) / spanX) * canvas.width;
+        const dh = ((tMaxY - tMinY) / spanY) * canvas.height;
+        // +0.6px bleed eliminates hairline seams between adjacent tiles
+        ctx.drawImage(t.img, dx, dy, dw + 0.6, dh + 0.6);
+      }
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const res = { dataUrl, attribution: prov.label };
+      aerialBackdropCache.set(key, res);
+      return res;
+    } catch (_) {
+      // Canvas tainted or CORS blocked on this provider — try fallback provider
+      continue;
+    }
+  }
+  return null;
+}
+
+async function buildPinDetailSvgWithBackdrop(drawingCode, submissionLabel) {
+  const mode = getPinMapBackdropMode();
+  const vp = computePinMapViewport(assessment, spatial);
+  if (!vp) {
+    return renderGisPinDetailMapSvg(assessment, spatial, { drawingCode, submissionLabel, model: lastModel, backdropMode: "vector" });
+  }
+  let aerial = null;
+  if (mode === "aerial") {
+    aerial = await captureAerialBackdropDataUrl(vp);
+  }
+  return renderGisPinDetailMapSvg(assessment, spatial, {
+    drawingCode,
+    submissionLabel,
+    model: lastModel,
+    backdropMode: aerial ? "aerial" : "vector",
+    aerialDataUrl: aerial?.dataUrl || null,
+    aerialAttribution: aerial?.attribution || null,
+  });
+}
+
 function renderEmbeddedDrawingsPreview() {
   if (!assessment || !lastModel || !lastAudit) return;
+  syncPinBackdropButtons();
   const elTT = document.getElementById("prevTreatmentTrain");
   const elGis = document.getElementById("prevGisMap");
+  const elPinMap = document.getElementById("prevPinMap");
+  const elSeePinMap = document.getElementById("prevSeePinMap");
   const elBh = document.getElementById("prevBoreholeProfile");
   const elSizing = document.getElementById("prevSizingChart");
   const elGrWrap = document.getElementById("prevGreaseWrap");
@@ -938,6 +1100,24 @@ function renderEmbeddedDrawingsPreview() {
   const elSeeGis = document.getElementById("prevSeeGisMap");
   if (elSeeGis) {
     elSeeGis.innerHTML = renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel });
+  }
+
+  // Render Zoomed Exact-GPS Feature Plan (Map 2) immediately in Vector, then swap in stitched Aerial Backdrop when selected
+  const seq = ++pinMapPreviewSeq;
+  const vectorOssmPinSvg = renderGisPinDetailMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-02", submissionLabel: "S68 SUBMISSION", model: lastModel, backdropMode: "vector" });
+  const vectorSeePinSvg = renderGisPinDetailMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-02", submissionLabel: "DA SUBMISSION", model: lastModel, backdropMode: "vector" });
+  if (elPinMap) elPinMap.innerHTML = vectorOssmPinSvg;
+  if (elSeePinMap) elSeePinMap.innerHTML = vectorSeePinSvg;
+
+  if (getPinMapBackdropMode() === "aerial" && computePinMapViewport(assessment, spatial)) {
+    Promise.all([
+      buildPinDetailSvgWithBackdrop("OSSM-GIS-02", "S68 SUBMISSION"),
+      buildPinDetailSvgWithBackdrop("SEE-GIS-02", "DA SUBMISSION"),
+    ]).then(([ossmAerialSvg, seeAerialSvg]) => {
+      if (seq !== pinMapPreviewSeq) return;
+      if (elPinMap) elPinMap.innerHTML = ossmAerialSvg;
+      if (elSeePinMap) elSeePinMap.innerHTML = seeAerialSvg;
+    }).catch(() => {});
   }
 
   const hasGrease = (lastModel.grease_arrestor_min_l || 0) > 0;
@@ -2471,9 +2651,15 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
     const isIrrig = assessment.land_application_type !== "eta_beds";
     const hasGrease = (lastModel.grease_arrestor_min_l || 0) > 0;
 
+    const hasPins = Boolean(computePinMapViewport(assessment, spatial));
+    const pinDetailSvg = hasPins
+      ? await buildPinDetailSvgWithBackdrop("OSSM-GIS-02", "S68 SUBMISSION")
+      : null;
+
     const [
       cadPngBytes,
       gisPngBytes,
+      pinMapPngBytes,
       ttPngBytes,
       sizingPngBytes,
       bhPngBytes,
@@ -2484,6 +2670,7 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
     ] = await Promise.all([
       rasterizeSvgToPngArrayBuffer(renderCadLayoutSvg(assessment, lastModel), "CAD Layout"),
       rasterizeSvgToPngArrayBuffer(renderGisSiteMapSvg(assessment, spatial, { drawingCode: "OSSM-GIS-01", submissionLabel: "S68 SUBMISSION", model: lastModel }), "GIS Site Map"),
+      pinDetailSvg ? rasterizeSvgToPngArrayBuffer(pinDetailSvg, "Zoomed GPS Feature Plan") : Promise.resolve(null),
       rasterizeSvgToPngArrayBuffer(renderTreatmentTrainSvg(assessment, lastModel), "Treatment Train"),
       rasterizeSvgToPngArrayBuffer(renderSizingAndWaterBalanceSvg(assessment, lastModel), "Sizing & Water Balance Chart"),
       (assessment.boreholes || []).length ? rasterizeSvgToPngArrayBuffer(renderBoreholeProfileSvg(assessment, lastModel, lastAudit), "Borehole Soil Profile") : Promise.resolve(null),
@@ -2498,11 +2685,12 @@ document.getElementById("btnCompilePackage").addEventListener("click", async () 
       ),
     ]);
 
-    const embeddedDrawingsCount = [cadPngBytes, gisPngBytes, ttPngBytes, sizingPngBytes, bhPngBytes, greasePngBytes, septicPngBytes, rbPngBytes, laaPngBytes].filter(Boolean).length;
+    const embeddedDrawingsCount = [cadPngBytes, gisPngBytes, pinMapPngBytes, ttPngBytes, sizingPngBytes, bhPngBytes, greasePngBytes, septicPngBytes, rbPngBytes, laaPngBytes].filter(Boolean).length;
     logExport(`Rasterized ${embeddedDrawingsCount} engineering drawing(s). Compiling .DOCX + .DXF in Pyodide...`);
 
     const diagrams = {
       treatment_train: ttPngBytes,
+      pin_detail_map: pinMapPngBytes,
       sizing_chart: sizingPngBytes,
       borehole_profile: bhPngBytes,
       grease_xsec: greasePngBytes,
@@ -3054,11 +3242,16 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
   btn.disabled = true;
   if (prog) prog.classList.add("active");
   try {
-    logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)...`;
-    const gisPngBytes = await rasterizeSvgToPngArrayBuffer(
-      renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel }),
-      "SEE GIS Site Map",
-    );
+    logEl.textContent = `[${new Date().toLocaleTimeString()}] Rasterizing GDA2020 GIS Site Location Map (SEE-GIS-01)${computePinMapViewport(assessment, spatial) ? " & Zoomed Feature Plan (SEE-GIS-02)" : ""}...`;
+    const hasSeePins = Boolean(computePinMapViewport(assessment, spatial));
+    const seePinSvg = hasSeePins ? await buildPinDetailSvgWithBackdrop("SEE-GIS-02", "DA SUBMISSION") : null;
+    const [gisPngBytes, pinMapPngBytes] = await Promise.all([
+      rasterizeSvgToPngArrayBuffer(
+        renderGisSiteMapSvg(assessment, spatial, { drawingCode: "SEE-GIS-01", submissionLabel: "DA SUBMISSION", model: lastModel }),
+        "SEE GIS Site Map",
+      ),
+      seePinSvg ? rasterizeSvgToPngArrayBuffer(seePinSvg, "SEE Zoomed GPS Feature Plan") : Promise.resolve(null),
+    ]);
     const photosPayload = localPhotos.map((p) => ({
       caption: p.caption,
       ext: p.ext,
@@ -3070,6 +3263,8 @@ document.getElementById("btnCompileSee")?.addEventListener("click", async () => 
       seeInput,
       spatial,
       gisPngBytes,
+      pinMapPngBytes,
+      fieldPins: assessment.field_pins || [],
       photos: photosPayload,
     });
 

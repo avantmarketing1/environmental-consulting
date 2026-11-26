@@ -37,6 +37,8 @@ def build_see_docx_report(
     audit: SEEComplianceAuditResult,
     out_docx: Path,
     gis_map_png: Path | None = None,
+    pin_map_png: Path | None = None,
+    field_pins: list[dict] | None = None,
     photo_items: list[tuple[Path, str]] | None = None,
 ) -> Path:
     """Assemble a complete Lismore City Council Statement of Environmental Effects (.docx)."""
@@ -246,9 +248,35 @@ def build_see_docx_report(
     _add_figure(
         doc,
         gis_map_png,
-        "Figure 1: GDA2020 / MGA Zone 56 Site Location, Cadastre, Contours & Watercourse Buffer Map (Drawing SEE-GIS-01).",
+        "Figure 1: GDA2020 / MGA Zone 56 Whole-Parcel Site Location, Cadastre, Contours & Watercourse Buffer Map (Drawing SEE-GIS-01).",
         width_in=6.5,
     )
+
+    if (pin_map_png and pin_map_png.exists()) or field_pins:
+        _add_heading(doc, "2.1 Zoomed Site Features & Proposed Works Extent Plan (Drawing SEE-GIS-02)", level=2)
+        _add_figure(
+            doc,
+            pin_map_png,
+            "Figure 2: Zoomed GDA2020 / MGA Zone 56 Exact GPS Feature Plan (Drawing SEE-GIS-02). Features are identified by the symbol legend and coordinate schedule below.",
+            width_in=6.5,
+        )
+        if field_pins:
+            pin_rows = []
+            for fp in field_pins:
+                ft_label = str(fp.get("feature_type") or "feature").replace("_", " ").title()
+                e_val = fp.get("easting_mga56")
+                n_val = fp.get("northing_mga56")
+                lat_val = fp.get("latitude")
+                lon_val = fp.get("longitude")
+                e_str = f"{float(e_val):,.1f}" if e_val is not None else "—"
+                n_str = f"{float(n_val):,.1f}" if n_val is not None else "—"
+                ll_str = f"{float(lat_val):.5f}, {float(lon_val):.5f}" if (lat_val is not None and lon_val is not None) else "—"
+                pin_rows.append([str(fp.get("label") or ft_label), ft_label, e_str, n_str, ll_str])
+            _add_grid_table(
+                doc,
+                ["Feature Label", "Type", "MGA56 Easting (E)", "MGA56 Northing (N)", "WGS84 Lat / Lon"],
+                pin_rows,
+            )
 
     doc.add_page_break()
 

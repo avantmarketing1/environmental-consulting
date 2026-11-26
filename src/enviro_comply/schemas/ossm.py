@@ -220,6 +220,7 @@ class SiteAssessmentInput(BaseModel):
     block_size_m2: float = Field(gt=0.0)
     development_description: str = "Combined Secondary On-Site Wastewater Treatment and Disposal System"
     development_category: DevelopmentCategory = DevelopmentCategory.SINGLE_DWELLING
+    pin_map_backdrop: Literal["vector", "aerial"] = "vector"
     wastewater_sources: list[WastewaterSource] = Field(default_factory=list)
     grease_arrestor_required: bool = False
     grease_arrestor_capacity_l: Optional[int] = Field(default=None, ge=0)

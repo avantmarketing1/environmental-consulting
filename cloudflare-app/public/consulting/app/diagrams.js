@@ -737,9 +737,127 @@ export function renderSdiCrossSectionSvg(inp, model) {
   </svg>`;
 }
 
-/** 6. Browser-Rendered GDA2020 / MGA Zone 56 GIS Site Location, Pin & Watercourse Buffer Map (SVG) */
+/** Web Mercator helpers for pixel-exact alignment between aerial tiles and GPS pins */
+function lonToMercX(lon) {
+  return (lon + 180) / 360;
+}
+function latToMercY(lat) {
+  const rad = (lat * Math.PI) / 180;
+  return (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2;
+}
+function mercXToLon(x) {
+  return x * 360 - 180;
+}
+function mercYToLat(y) {
+  const n = Math.PI - 2 * Math.PI * y;
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+}
+
+function extractValidPins(inp) {
+  const out = [];
+  for (const pin of inp?.field_pins || []) {
+    const pLat = pin.latitude != null ? Number(pin.latitude) : (pin.northing_mga56 && Math.abs(pin.northing_mga56) <= 90 ? Number(pin.northing_mga56) : null);
+    const pLon = pin.longitude != null ? Number(pin.longitude) : (pin.easting_mga56 && Math.abs(pin.easting_mga56) <= 180 ? Number(pin.easting_mga56) : null);
+    if (pLat == null || pLon == null || !Number.isFinite(pLat) || !Number.isFinite(pLon)) continue;
+    const spec = PIN_FEATURE_SPECS[pin.feature_type] || PIN_FEATURE_SPECS.custom;
+    out.push({ pin, spec, lat: pLat, lon: pLon });
+  }
+  return out;
+}
+
+/**
+ * Computes the exact Web Mercator viewport for Drawing 2 (Zoomed Exact-GPS Pin & Infrastructure Plan).
+ * Shared by both renderGisPinDetailMapSvg and the browser aerial tile stitcher for 0 px alignment error.
+ */
+export function computePinMapViewport(inp, spatial, options = {}) {
+  const mapX = options.mapX ?? 24;
+  const mapY = options.mapY ?? 44;
+  const mapW = options.mapW ?? 582;
+  const mapH = options.mapH ?? 408;
+  const validPins = extractValidPins(inp);
+  if (!validPins.length) return null;
+
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const p of validPins) {
+    if (p.lon < minLon) minLon = p.lon;
+    if (p.lon > maxLon) maxLon = p.lon;
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+  }
+
+  const midLat = (minLat + maxLat) / 2;
+  const midLon = (minLon + maxLon) / 2;
+  const mPerDegLat = 111132;
+  const mPerDegLon = 111320 * Math.cos((midLat * Math.PI) / 180);
+
+  const rawSpanLonM = (maxLon - minLon) * mPerDegLon;
+  const rawSpanLatM = (maxLat - minLat) * mPerDegLat;
+  const baseSpanM = Math.max(rawSpanLonM, rawSpanLatM);
+  // Generous tight framing: minimum 56 m across so single/clustered fixtures + footprints have clear context
+  const padM = Math.max(18, baseSpanM * 0.34);
+  let targetWM = Math.max(58, rawSpanLonM + padM * 2);
+  let targetHM = Math.max(42, rawSpanLatM + padM * 2);
+
+  // Match exact map frame aspect ratio (mapW / mapH) with zero letterboxing so aerial tiles fill edge-to-edge
+  const aspect = mapW / mapH;
+  if (targetWM / targetHM < aspect) {
+    targetWM = targetHM * aspect;
+  } else {
+    targetHM = targetWM / aspect;
+  }
+
+  const halfLon = targetWM / 2 / mPerDegLon;
+  const halfLat = targetHM / 2 / mPerDegLat;
+  const viewMinLon = midLon - halfLon;
+  const viewMaxLon = midLon + halfLon;
+  const viewMinLat = midLat - halfLat;
+  const viewMaxLat = midLat + halfLat;
+
+  const mercMinX = lonToMercX(viewMinLon);
+  const mercMaxX = lonToMercX(viewMaxLon);
+  const mercMinY = latToMercY(viewMaxLat); // north = smaller mercY
+  const mercMaxY = latToMercY(viewMinLat); // south = larger mercY
+  const mercSpanX = Math.max(1e-12, mercMaxX - mercMinX);
+  const mercSpanY = Math.max(1e-12, mercMaxY - mercMinY);
+
+  // Choose ideal slippy tile zoom level (~1.4x retina resolution)
+  const worldPxNeeded = (mapW * 1.35) / mercSpanX;
+  const idealZoom = Math.max(14, Math.min(19, Math.round(Math.log2(worldPxNeeded / 256))));
+  const scalePxPerM = mapW / targetWM;
+
+  const proj = (lon, lat) => [
+    mapX + ((lonToMercX(lon) - mercMinX) / mercSpanX) * mapW,
+    mapY + ((latToMercY(lat) - mercMinY) / mercSpanY) * mapH,
+  ];
+
+  return {
+    pins: validPins,
+    midLat,
+    midLon,
+    viewMinLon: mercXToLon(mercMinX),
+    viewMaxLon: mercXToLon(mercMaxX),
+    viewMinLat: mercYToLat(mercMaxY),
+    viewMaxLat: mercYToLat(mercMinY),
+    mercMinX,
+    mercMaxX,
+    mercMinY,
+    mercMaxY,
+    targetWM,
+    targetHM,
+    scalePxPerM,
+    zoom: idealZoom,
+    mapX,
+    mapY,
+    mapW,
+    mapH,
+    proj,
+  };
+}
+
+/** 6. Browser-Rendered GDA2020 / MGA Zone 56 Whole-Parcel Site Location & Constraints Map (Drawing 1 — Clean Locality, No Pin Clutter) */
 export function renderGisSiteMapSvg(inp, spatial, options = {}) {
   const drawingCode = options.drawingCode || "OSSM-GIS-01";
+  const detailCode = options.detailDrawingCode || (drawingCode.startsWith("SEE") ? "SEE-GIS-02" : "OSSM-GIS-02");
   const submissionLabel = options.submissionLabel || "S68 SUBMISSION";
   const W = 820, H = 560;
   const mapX = 56, mapY = 44, mapW = 738, mapH = 408;
@@ -755,7 +873,6 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     </svg>`;
   }
 
-  // Extract subject parcel bbox (WGS84 lon/lat) & project linearly using local metres scale around centroid
   const coordsOf = (geom) => {
     if (!geom) return [];
     if (geom.type === "Polygon") return geom.coordinates;
@@ -790,7 +907,7 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
 
   const viewWM = (viewMaxLon - viewMinLon) * mPerDegLon;
   const viewHM = (viewMaxLat - viewMinLat) * mPerDegLat;
-  const scale = Math.min(mapW / viewWM, mapH / viewHM); // px per metre
+  const scale = Math.min(mapW / viewWM, mapH / viewHM);
   const usedW = viewWM * scale;
   const usedH = viewHM * scale;
   const offX = mapX + (mapW - usedW) / 2;
@@ -861,26 +978,29 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     wcLineSvg += `<path d="${d}" fill="none" stroke="#1d4ed8" stroke-width="1.8" stroke-linecap="round" />`;
   }
 
-  // Dropped GDA2020 Field Pins — Custom Scaled Architectural/Engineering Icons + Collision-Free Leader Callouts
-  const rawPins = [];
-  for (const pin of inp.field_pins || []) {
-    const pLat = pin.latitude != null ? Number(pin.latitude) : (pin.northing_mga56 && Math.abs(pin.northing_mga56) <= 90 ? Number(pin.northing_mga56) : null);
-    const pLon = pin.longitude != null ? Number(pin.longitude) : (pin.easting_mga56 && Math.abs(pin.easting_mga56) <= 180 ? Number(pin.easting_mga56) : null);
-    if (pLat == null || pLon == null) continue;
-    const [px, py] = proj(pLon, pLat);
-    if (px < mapX + 4 || px > mapX + mapW - 4 || py < mapY + 4 || py > mapY + mapH - 4) continue;
-    const spec = PIN_FEATURE_SPECS[pin.feature_type] || PIN_FEATURE_SPECS.custom;
-    rawPins.push({
-      pin,
-      spec,
-      px,
-      py,
-      ix: px,
-      iy: py,
-      lbl: String(pin.label || spec.shortLabel || pin.feature_type),
-    });
+  // Detail Area Extent Indicator Box (when GPS pins exist, show clean dashed key-plan box instead of cramped pins)
+  const pinVp = computePinMapViewport(inp, spatial);
+  let detailExtentSvg = "";
+  const hasDetailExtent = Boolean(pinVp);
+  if (pinVp) {
+    const [dx1, dy1] = proj(pinVp.viewMinLon, pinVp.viewMaxLat);
+    const [dx2, dy2] = proj(pinVp.viewMaxLon, pinVp.viewMinLat);
+    const dCx = (dx1 + dx2) / 2;
+    const dCy = (dy1 + dy2) / 2;
+    const dW = Math.max(26, Math.abs(dx2 - dx1));
+    const dH = Math.max(20, Math.abs(dy2 - dy1));
+    const bx = Math.max(mapX + 10, Math.min(mapX + mapW - dW - 10, dCx - dW / 2));
+    const by = Math.max(mapY + 38, Math.min(mapY + mapH - dH - 22, dCy - dH / 2));
+    const tagText = `DETAIL AREA — SEE ${detailCode}`;
+    const tagW = tagText.length * 4.9 + 12;
+    const tagX = Math.max(mapX + 8, Math.min(mapX + mapW - tagW - 8, bx + dW / 2 - tagW / 2));
+    const tagY = by - 19 >= mapY + 36 ? by - 19 : by + dH + 4;
+    detailExtentSvg = `
+      <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${dW.toFixed(1)}" height="${dH.toFixed(1)}" rx="3" fill="rgba(15,23,42,0.08)" stroke="#0f172a" stroke-width="1.8" stroke-dasharray="5,3" />
+      <rect x="${tagX.toFixed(1)}" y="${tagY.toFixed(1)}" width="${tagW.toFixed(1)}" height="15" rx="3" fill="#0f172a" />
+      <text x="${(tagX + tagW / 2).toFixed(1)}" y="${(tagY + 10.5).toFixed(1)}" text-anchor="middle" font-size="7.4" font-weight="800" fill="#ffffff">${esc(tagText)}</text>
+    `;
   }
-  const plottedPinsCount = rawPins.length;
 
   // Triggered statutory overlay ribbon (top-left of map frame)
   const activeOverlays = [];
@@ -896,15 +1016,12 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
        <text x="${mapX + 18}" y="${mapY + 24}" font-size="8.2" font-weight="800" fill="#92400e">ACTIVE OVERLAYS: ${esc(activeOverlays.join(" · "))}</text>`
     : "";
 
-  // Determine unique pin types for dynamic Legend Feature Key
-  const uniquePinTypes = [...new Set(rawPins.map((r) => r.pin.feature_type))];
-  const pinKeyRows = Math.ceil(uniquePinTypes.length / 2);
   const legendW = 208;
   const legendX = mapX + mapW - legendW - 10;
   const legendY = mapY + 10;
-  const legendH = plottedPinsCount > 0 ? 116 + pinKeyRows * 16 : 108;
+  const legendH = hasDetailExtent ? 114 : 98;
 
-  // Subject parcel + centroid pill
+  // Subject parcel + centroid pill (shown cleanly when no Detail Extent box occupies the center)
   const subjD = polyPath(subjRings);
   const [cx, cy] = proj(spatial.centroid_lon || (minLon + maxLon) / 2, spatial.centroid_lat || (minLat + maxLat) / 2);
 
@@ -912,223 +1029,6 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
   const targetM = (mapW / scale) * 0.22;
   const barM = [20, 50, 100, 200, 250, 500, 1000].reduce((a, b) => (Math.abs(b - targetM) < Math.abs(a - targetM) ? b : a));
   const barPx = barM * scale;
-
-  // 1) Scaled design footprints under pins (when zoomed in enough that metres are legible on the GIS map)
-  const model = options.model || null;
-  let footprintsSvg = "";
-  for (const rp of rawPins) {
-    const ft = rp.pin.feature_type;
-    let wM = rp.pin.width_m ? Number(rp.pin.width_m) : 0;
-    let lM = rp.pin.length_m ? Number(rp.pin.length_m) : 0;
-    if ((!wM || !lM) && model) {
-      const tr = model.trench_layout || {};
-      if (ft === "eta_bed" || ft === "reserve_laa") {
-        lM = Number(tr.trench_length_m || 0);
-        const nTr = Math.max(1, Number(tr.number_of_trenches || 1));
-        wM = nTr * Number(tr.trench_width_m || 2) + (nTr - 1) * Number(tr.trench_separation_m || 0);
-      } else if (ft === "reed_bed" && (model.recommended_reed_bed_count || 0) > 0) {
-        const d = resolveReedBedDims(model, inp);
-        const nRb = Math.max(1, Number(model.recommended_reed_bed_count || 1));
-        lM = nRb * Number(d.length_m || 3.0) + (nRb - 1) * 0.5;
-        wM = Number(d.width_m || 1.9);
-      } else if (ft === "septic_tank") {
-        lM = 2.6;
-        wM = 1.6;
-      }
-    }
-    const fw = lM * scale;
-    const fh = wM * scale;
-    if (fw >= 7 || fh >= 7) {
-      const rot = Number(rp.pin.rotation_deg || 0);
-      const dash = ft === "reserve_laa" ? ' stroke-dasharray="4,2.5"' : "";
-      footprintsSvg += `<rect x="${(rp.px - fw / 2).toFixed(1)}" y="${(rp.py - fh / 2).toFixed(1)}" width="${Math.max(4, fw).toFixed(1)}" height="${Math.max(4, fh).toFixed(1)}" rx="1.5" fill="${rp.spec.color}" fill-opacity="0.18" stroke="${rp.spec.color}" stroke-width="1.3"${dash} transform="rotate(${rot.toFixed(1)} ${rp.px.toFixed(1)} ${rp.py.toFixed(1)})" />`;
-    }
-  }
-
-  // 2) Gentle icon repulsion so clustered icons (e.g. Septic/Reed Bed/ETA within 20 m) never stack into a blob
-  const iconScale = plottedPinsCount >= 7 ? 0.72 : plottedPinsCount >= 4 ? 0.80 : 0.88;
-  const iconR = 13.5 * iconScale;
-  const minIconDist = iconR * 2 + 4;
-  if (rawPins.length > 1) {
-    for (let iter = 0; iter < 28; iter++) {
-      let moved = false;
-      for (let i = 0; i < rawPins.length; i++) {
-        for (let j = i + 1; j < rawPins.length; j++) {
-          const a = rawPins[i];
-          const b = rawPins[j];
-          let dx = b.ix - a.ix;
-          let dy = b.iy - a.iy;
-          let dist = Math.hypot(dx, dy);
-          if (dist < minIconDist) {
-            if (dist < 0.01) {
-              const ang = ((i * 2.39996 + j * 1.1) % (Math.PI * 2));
-              dx = Math.cos(ang);
-              dy = Math.sin(ang);
-              dist = 1;
-            }
-            const push = (minIconDist - dist) * 0.52;
-            const ux = dx / dist;
-            const uy = dy / dist;
-            a.ix -= ux * push;
-            a.iy -= uy * push;
-            b.ix += ux * push;
-            b.iy += uy * push;
-            moved = true;
-          }
-        }
-      }
-      // Keep nudged icons softly tethered to their exact coordinate & inside map frame
-      for (const r of rawPins) {
-        const ddx = r.ix - r.px;
-        const ddy = r.iy - r.py;
-        const dd = Math.hypot(ddx, ddy);
-        if (dd > 18) {
-          r.ix = r.px + (ddx / dd) * 18;
-          r.iy = r.py + (ddy / dd) * 18;
-        }
-        r.ix = Math.max(mapX + iconR + 4, Math.min(mapX + mapW - iconR - 4, r.ix));
-        r.iy = Math.max(mapY + iconR + 4, Math.min(mapY + mapH - iconR - 4, r.iy));
-      }
-      if (!moved) break;
-    }
-  }
-
-  // 3) Collision-free Radial Leader-Line Callout Layout Engine
-  const rectsOverlap = (a, b, pad = 3) =>
-    !(a.x2 + pad <= b.x1 || a.x1 - pad >= b.x2 || a.y2 + pad <= b.y1 || a.y1 - pad >= b.y2);
-
-  const segsIntersect = (p1, p2, p3, p4) => {
-    const ccw = (A, B, C) => (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
-    return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
-  };
-
-  // Static map-furniture obstacles so callouts NEVER collide with legend, overlays banner, scale bar or north arrow
-  const obstacles = [
-    { x1: legendX - 4, y1: legendY - 4, x2: legendX + legendW + 4, y2: legendY + legendH + 4 },
-    { x1: mapX + 10, y1: mapY + mapH - 42, x2: mapX + 24 + barPx, y2: mapY + mapH - 4 }, // scale bar
-    { x1: mapX + mapW - 56, y1: mapY + mapH - 72, x2: mapX + mapW - 8, y2: mapY + mapH - 6 }, // north arrow
-  ];
-  if (activeOverlays.length) {
-    obstacles.push({ x1: mapX + 6, y1: mapY + 6, x2: mapX + 14 + overlayBannerW, y2: mapY + 36 });
-  }
-  for (const r of rawPins) {
-    obstacles.push({ x1: r.ix - iconR - 2, y1: r.iy - iconR - 2, x2: r.ix + iconR + 2, y2: r.iy + iconR + 2 });
-  }
-
-  const clusterCx = rawPins.length ? rawPins.reduce((s, r) => s + r.ix, 0) / rawPins.length : cx;
-  const clusterCy = rawPins.length ? rawPins.reduce((s, r) => s + r.iy, 0) / rawPins.length : cy;
-  const sortedPins = [...rawPins].sort((a, b) => {
-    const aa = Math.atan2(a.iy - clusterCy, a.ix - clusterCx);
-    const ba = Math.atan2(b.iy - clusterCy, b.ix - clusterCx);
-    return aa - ba;
-  });
-
-  const placedBoxes = [];
-  const placedLeaders = [];
-  let pinAnchorsSvg = "";
-  let pinLeadersSvg = "";
-  let pinIconsSvg = "";
-  let pinLabelsSvg = "";
-
-  const angleOffsets = [0, 0.35, -0.35, 0.72, -0.72, 1.12, -1.12, 1.57, -1.57, 2.05, -2.05, 2.55, -2.55, Math.PI];
-  const radii = [32, 48, 66, 86, 110, 138];
-
-  for (const rp of sortedPins) {
-    const lblText = rp.lbl.length > 22 ? rp.lbl.slice(0, 21) + "…" : rp.lbl;
-    const boxW = Math.max(44, Math.min(138, lblText.length * 5.05 + 14));
-    const boxH = 16;
-    const baseAngle =
-      rawPins.length === 1
-        ? -0.42
-        : Math.atan2(rp.iy - clusterCy, rp.ix - clusterCx);
-
-    let best = null;
-    for (const rad of radii) {
-      for (const dAng of angleOffsets) {
-        const ang = baseAngle + dAng;
-        const tx = rp.ix + Math.cos(ang) * rad;
-        const ty = rp.iy + Math.sin(ang) * rad;
-        // Anchor box outward from angle so leader attaches cleanly
-        let bx = Math.cos(ang) >= 0 ? tx : tx - boxW;
-        let by = ty - boxH / 2;
-        bx = Math.max(mapX + 8, Math.min(mapX + mapW - boxW - 8, bx));
-        by = Math.max(mapY + 8, Math.min(mapY + mapH - boxH - 8, by));
-        const rect = { x1: bx, y1: by, x2: bx + boxW, y2: by + boxH };
-
-        // Nearest attachment point on label rect to icon center
-        const attachX = Math.max(rect.x1, Math.min(rect.x2, rp.ix));
-        const attachY = Math.max(rect.y1, Math.min(rect.y2, rp.iy));
-        const pStart = { x: rp.ix, y: rp.iy };
-        const pEnd = { x: attachX, y: attachY };
-
-        let penalty = Math.hypot(attachX - rp.ix, attachY - rp.iy) * 0.8 + Math.abs(dAng) * 14;
-        for (const ob of obstacles) {
-          if (rectsOverlap(rect, ob, 3)) penalty += 10000;
-        }
-        for (const pb of placedBoxes) {
-          if (rectsOverlap(rect, pb, 4)) penalty += 12000;
-        }
-        for (const pl of placedLeaders) {
-          if (segsIntersect(pStart, pEnd, pl.a, pl.b)) penalty += 1800;
-        }
-        if (!best || penalty < best.penalty) {
-          best = { penalty, rect, attachX, attachY };
-        }
-      }
-      if (best && best.penalty < 500) break;
-    }
-
-    const { rect, attachX, attachY } = best;
-    placedBoxes.push(rect);
-    placedLeaders.push({ a: { x: rp.ix, y: rp.iy }, b: { x: attachX, y: attachY } });
-
-    // If icon was nudged away from its true coordinate, show exact true-coordinate dot + micro-stem
-    if (Math.hypot(rp.ix - rp.px, rp.iy - rp.py) > 2.5) {
-      pinAnchorsSvg += `
-        <line x1="${rp.px.toFixed(1)}" y1="${rp.py.toFixed(1)}" x2="${rp.ix.toFixed(1)}" y2="${rp.iy.toFixed(1)}" stroke="#ffffff" stroke-width="2.6" />
-        <line x1="${rp.px.toFixed(1)}" y1="${rp.py.toFixed(1)}" x2="${rp.ix.toFixed(1)}" y2="${rp.iy.toFixed(1)}" stroke="${rp.spec.color}" stroke-width="1.2" stroke-dasharray="2,1.5" />
-        <circle cx="${rp.px.toFixed(1)}" cy="${rp.py.toFixed(1)}" r="2.6" fill="${rp.spec.color}" stroke="#ffffff" stroke-width="1" />
-      `;
-    }
-
-    // Crisp haloed leader line from icon to callout pill
-    pinLeadersSvg += `
-      <line x1="${rp.ix.toFixed(1)}" y1="${rp.iy.toFixed(1)}" x2="${attachX.toFixed(1)}" y2="${attachY.toFixed(1)}" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round" />
-      <line x1="${rp.ix.toFixed(1)}" y1="${rp.iy.toFixed(1)}" x2="${attachX.toFixed(1)}" y2="${attachY.toFixed(1)}" stroke="${rp.spec.color}" stroke-width="1.2" stroke-linecap="round" />
-    `;
-
-    // Custom architectural/engineering SVG symbol scaled cleanly
-    pinIconsSvg += `<g transform="translate(${rp.ix.toFixed(1)}, ${rp.iy.toFixed(1)}) scale(${iconScale.toFixed(2)})">${renderPinGlyphInner(rp.pin.feature_type)}</g>`;
-
-    // Crisp callout pill with colored accent bar
-    pinLabelsSvg += `
-      <g>
-        <rect x="${rect.x1.toFixed(1)}" y="${rect.y1.toFixed(1)}" width="${(rect.x2 - rect.x1).toFixed(1)}" height="${(rect.y2 - rect.y1).toFixed(1)}" rx="3.5" fill="rgba(255,255,255,0.96)" stroke="${rp.spec.color}" stroke-width="0.9" />
-        <rect x="${rect.x1.toFixed(1)}" y="${rect.y1.toFixed(1)}" width="3.5" height="${(rect.y2 - rect.y1).toFixed(1)}" rx="1.5" fill="${rp.spec.color}" />
-        <text x="${(rect.x1 + 7.5).toFixed(1)}" y="${(rect.y1 + 11.2).toFixed(1)}" font-size="7.6" font-weight="800" fill="#0f172a">${esc(lblText)}</text>
-      </g>
-    `;
-  }
-
-  const pinsSvg = `${footprintsSvg}${pinAnchorsSvg}${pinLeadersSvg}${pinIconsSvg}${pinLabelsSvg}`;
-
-  // Dynamic Pin Feature Key inside Legend
-  let legendPinsKeySvg = "";
-  if (plottedPinsCount > 0) {
-    legendPinsKeySvg += `<text x="${legendX + 10}" y="${legendY + 111}" font-size="8.0" font-weight="800" fill="#0f172a">GPS Field Pins (${plottedPinsCount})</text>`;
-    uniquePinTypes.forEach((ft, idx) => {
-      const spec = PIN_FEATURE_SPECS[ft] || PIN_FEATURE_SPECS.custom;
-      const colIdx = idx % 2;
-      const rowIdx = Math.floor(idx / 2);
-      const kx = legendX + 17 + colIdx * 98;
-      const ky = legendY + 123 + rowIdx * 16;
-      legendPinsKeySvg += `
-        <g transform="translate(${kx.toFixed(1)}, ${ky.toFixed(1)}) scale(0.42)">${renderPinGlyphInner(ft)}</g>
-        <text x="${(kx + 9).toFixed(1)}" y="${(ky + 2.8).toFixed(1)}" font-size="7.4" font-weight="600" fill="#1e293b">${esc(spec.label.split(" / ")[0])}</text>
-      `;
-    });
-  }
-
   const zoningStr = (spatial.land_zoning || []).join(", ") || "Verify LEP";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
@@ -1144,15 +1044,15 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     <g clip-path="url(#gisClip)">
       ${nbSvg}
       ${contSvg}
-      <path d="${subjD}" fill="#fecaca" fill-opacity="0.56" stroke="#991b1b" stroke-width="2.4" />
+      <path d="${subjD}" fill="#fecaca" fill-opacity="0.52" stroke="#991b1b" stroke-width="2.4" />
       ${wcBuf100Svg}
       ${wcBufSvg}
       ${wcLineSvg}
-      ${plottedPinsCount === 0 ? `<rect x="${(cx - 64).toFixed(1)}" y="${(cy - 22).toFixed(1)}" width="128" height="44" rx="6" fill="rgba(255,255,255,0.92)" stroke="#991b1b" stroke-width="1.2" />
+      ${!hasDetailExtent ? `<rect x="${(cx - 64).toFixed(1)}" y="${(cy - 22).toFixed(1)}" width="128" height="44" rx="6" fill="rgba(255,255,255,0.92)" stroke="#991b1b" stroke-width="1.2" />
       <text x="${cx.toFixed(1)}" y="${(cy - 7).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#7f1d1d">SUBJECT LOT</text>
       <text x="${cx.toFixed(1)}" y="${(cy + 6).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#7f1d1d">Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}</text>
       <text x="${cx.toFixed(1)}" y="${(cy + 17).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#7f1d1d">(${(spatial.parcel_area_ha || inp.block_size_m2 / 10000).toFixed(2)} ha)</text>` : ""}
-      ${pinsSvg}
+      ${detailExtentSvg}
     </g>
     ${overlayBannerSvg}
 
@@ -1168,7 +1068,8 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     <text x="${legendX + 32}" y="${legendY + 68}" font-size="8.4" fill="#1e293b">40 m Gully / 100 m Stream Halo</text>
     <line x1="${legendX + 10}" y1="${legendY + 81}" x2="${legendX + 26}" y2="${legendY + 81}" stroke="#cbd5e1" stroke-width="1.3" />
     <text x="${legendX + 32}" y="${legendY + 84}" font-size="8.4" fill="#1e293b">NSW Elevation Contours</text>
-    ${plottedPinsCount > 0 ? `<line x1="${legendX + 10}" y1="${legendY + 95}" x2="${legendX + legendW - 10}" y2="${legendY + 95}" stroke="#e2e8f0" stroke-width="0.9" />${legendPinsKeySvg}` : ""}
+    ${hasDetailExtent ? `<rect x="${legendX + 10}" y="${legendY + 94}" width="16" height="10" fill="rgba(15,23,42,0.08)" stroke="#0f172a" stroke-width="1.4" stroke-dasharray="3,2" />
+    <text x="${legendX + 32}" y="${legendY + 103}" font-size="8.4" font-weight="700" fill="#0f172a">Detail Plan (${esc(detailCode)})</text>` : ""}
 
     <!-- Scale bar -->
     <g transform="translate(${mapX + 16}, ${mapY + mapH - 28})">
@@ -1205,6 +1106,260 @@ export function renderGisSiteMapSvg(inp, spatial, options = {}) {
     <text x="${mapX + 530}" y="502" font-size="8.3" fill="#1e293b">${esc(inp.consultant?.name || "Field To Forest")}</text>
     <text x="${mapX + 530}" y="517" font-size="8.3" fill="#1e293b">Ref: ${esc(inp.project_ref)}  |  Date: ${esc(inp.site_eval?.assessment_date || "")}</text>
     <text x="${mapX + 530}" y="532" font-size="8.3" font-weight="800" fill="#991b1b">Drawing: ${esc(drawingCode)}  |  ${esc(submissionLabel)}</text>
+  </svg>`;
+}
+
+/** 6b. Zoomed Exact-GPS Infrastructure & Site Features Map (Drawing 2 — Zero Pin Labels, Dedicated Side Legend, Vector or Aerial Backdrop) */
+export function renderGisPinDetailMapSvg(inp, spatial, options = {}) {
+  const drawingCode = options.drawingCode || "OSSM-GIS-02";
+  const submissionLabel = options.submissionLabel || "S68 SUBMISSION";
+  const W = 820, H = 560;
+  const mapX = 24, mapY = 44, mapW = 582, mapH = 408;
+  const legX = 616, legY = 44, legW = 180, legH = 408;
+
+  const vp = computePinMapViewport(inp, spatial, { mapX, mapY, mapW, mapH });
+  if (!vp) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#f8fafc; border:1px solid #cbd5e1; font-family:Inter,sans-serif;">
+      <text x="${W / 2}" y="${H / 2 - 10}" text-anchor="middle" font-size="13.5" font-weight="800" fill="#143628">
+        ZOOMED INFRASTRUCTURE &amp; GPS FEATURE PLAN (${esc(drawingCode)})
+      </text>
+      <text x="${W / 2}" y="${H / 2 + 16}" text-anchor="middle" font-size="10.5" fill="#52635c">
+        Place one or more GPS pins on the Interactive Map Studio to generate this zoomed site features plan.
+      </text>
+    </svg>`;
+  }
+
+  const isAerial = options.backdropMode === "aerial" && Boolean(options.aerialDataUrl);
+  const { proj, scalePxPerM: scale } = vp;
+
+  const coordsOf = (geom) => {
+    if (!geom) return [];
+    if (geom.type === "Polygon") return geom.coordinates;
+    if (geom.type === "MultiPolygon") return geom.coordinates.flat();
+    if (geom.type === "LineString") return [geom.coordinates];
+    if (geom.type === "MultiLineString") return geom.coordinates;
+    return [];
+  };
+  const polyPath = (rings) =>
+    rings
+      .map((ring) =>
+        ring
+          .map(([lo, la], idx) => {
+            const [x, y] = proj(lo, la);
+            return `${idx === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(" ") + " Z",
+      )
+      .join(" ");
+  const linePath = (lines) =>
+    lines
+      .map((line) =>
+        line
+          .map(([lo, la], idx) => {
+            const [x, y] = proj(lo, la);
+            return `${idx === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(" "),
+      )
+      .join(" ");
+
+  // Subtle vector grid in clean vector mode
+  let gridSvg = "";
+  if (!isAerial) {
+    const gridStepM = vp.targetWM > 160 ? 50 : vp.targetWM > 75 ? 20 : 10;
+    const stepPx = gridStepM * scale;
+    if (stepPx >= 24) {
+      for (let gx = mapX + stepPx; gx < mapX + mapW - 4; gx += stepPx) {
+        gridSvg += `<line x1="${gx.toFixed(1)}" y1="${mapY}" x2="${gx.toFixed(1)}" y2="${mapY + mapH}" stroke="#e2e8f0" stroke-width="0.6" />`;
+      }
+      for (let gy = mapY + stepPx; gy < mapY + mapH - 4; gy += stepPx) {
+        gridSvg += `<line x1="${mapX}" y1="${gy.toFixed(1)}" x2="${mapX + mapW}" y2="${gy.toFixed(1)}" stroke="#e2e8f0" stroke-width="0.6" />`;
+      }
+    }
+  }
+
+  // Adjoining parcels, contours, watercourses & subject parcel boundary
+  let nbSvg = "", contSvg = "", wcBuf100Svg = "", wcBufSvg = "", wcLineSvg = "", subjSvg = "";
+  if (spatial) {
+    for (const nf of spatial.neighbour_parcels_geojson || []) {
+      const rings = coordsOf(nf.geometry);
+      if (rings.length) {
+        nbSvg += `<path d="${polyPath(rings)}" fill="${isAerial ? "none" : "#ffffff"}" stroke="${isAerial ? "rgba(255,255,255,0.55)" : "#cbd5e1"}" stroke-width="1" />`;
+      }
+    }
+    for (const cf of spatial.contours_geojson || []) {
+      const lines = coordsOf(cf.geometry);
+      if (lines.length) {
+        contSvg += `<path d="${linePath(lines)}" fill="none" stroke="${isAerial ? "rgba(255,255,255,0.4)" : "#cbd5e1"}" stroke-width="0.85" />`;
+      }
+    }
+    if (spatial.parcel_geojson?.geometry) {
+      const subjRings = coordsOf(spatial.parcel_geojson.geometry);
+      if (subjRings.length) {
+        subjSvg = `<path d="${polyPath(subjRings)}" fill="${isAerial ? "rgba(254,202,202,0.08)" : "rgba(254,202,202,0.22)"}" stroke="${isAerial ? "#f87171" : "#991b1b"}" stroke-width="2.2" stroke-dasharray="7,3" />`;
+      }
+    }
+    const buf40Px = Math.max(4, Math.min(260, 80 * scale));
+    const buf100Px = Math.max(8, Math.min(520, 200 * scale));
+    for (const wf of spatial.watercourses_geojson || []) {
+      const lines = coordsOf(wf.geometry);
+      if (!lines.length) continue;
+      const d = linePath(lines);
+      wcBuf100Svg += `<path d="${d}" fill="none" stroke="#93c5fd" stroke-width="${buf100Px.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="${isAerial ? "0.14" : "0.18"}" />`;
+      wcBufSvg += `<path d="${d}" fill="none" stroke="#38bdf8" stroke-width="${buf40Px.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="${isAerial ? "0.22" : "0.28"}" />`;
+      wcLineSvg += `<path d="${d}" fill="none" stroke="${isAerial ? "#38bdf8" : "#1d4ed8"}" stroke-width="2.2" stroke-linecap="round" />`;
+    }
+  }
+
+  // Scaled true-size footprints + Exact-GPS Custom SVG Pins (ZERO text labels, ZERO artificial nudging)
+  const model = options.model || null;
+  let footprintsSvg = "";
+  let pinsSvg = "";
+  let hasFootprints = false;
+  const typeCounts = new Map();
+
+  for (const item of vp.pins) {
+    const { pin, spec, lon, lat } = item;
+    const [px, py] = proj(lon, lat);
+    typeCounts.set(pin.feature_type, (typeCounts.get(pin.feature_type) || 0) + 1);
+
+    // True-to-scale footprint rectangle beneath area features
+    let lM = pin.length_m ? Number(pin.length_m) : 0;
+    let wM = pin.width_m ? Number(pin.width_m) : 0;
+    if ((!lM || !wM) && model) {
+      const tr = model.trench_layout || {};
+      if (pin.feature_type === "eta_bed" || pin.feature_type === "reserve_laa") {
+        lM = Number(tr.trench_length_m || 0);
+        const nTr = Math.max(1, Number(tr.number_of_trenches || 1));
+        wM = nTr * Number(tr.trench_width_m || 2) + (nTr - 1) * Number(tr.trench_separation_m || 0);
+      } else if (pin.feature_type === "reed_bed" && (model.recommended_reed_bed_count || 0) > 0) {
+        const d = resolveReedBedDims(model, inp);
+        const nRb = Math.max(1, Number(model.recommended_reed_bed_count || 1));
+        lM = nRb * Number(d.length_m || 3.0) + (nRb - 1) * 0.5;
+        wM = Number(d.width_m || 1.9);
+      } else if (pin.feature_type === "septic_tank") {
+        lM = 2.6;
+        wM = 1.6;
+      } else if (pin.feature_type === "grease_arrestor") {
+        lM = 1.8;
+        wM = 1.2;
+      }
+    }
+    const fw = lM * scale;
+    const fh = wM * scale;
+    if (fw >= 6 || fh >= 6) {
+      hasFootprints = true;
+      const rot = Number(pin.rotation_deg || 0);
+      const dash = pin.feature_type === "reserve_laa" ? ' stroke-dasharray="5,3"' : "";
+      footprintsSvg += `<rect x="${(px - fw / 2).toFixed(1)}" y="${(py - fh / 2).toFixed(1)}" width="${Math.max(5, fw).toFixed(1)}" height="${Math.max(5, fh).toFixed(1)}" rx="2" fill="${spec.color}" fill-opacity="${isAerial ? "0.34" : "0.20"}" stroke="${isAerial ? "#ffffff" : spec.color}" stroke-width="${isAerial ? "2.0" : "1.5"}"${dash} transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})" />`;
+    }
+
+    // Exact GPS symbol (scaled cleanly for zoomed plan)
+    const symScale = vp.pins.length > 8 ? 0.86 : 0.96;
+    pinsSvg += `<g transform="translate(${px.toFixed(1)}, ${py.toFixed(1)}) scale(${symScale.toFixed(2)})">${renderPinGlyphInner(pin.feature_type)}</g>`;
+  }
+
+  // Metric Scale Bar tailored for zoomed extent (5 m, 10 m, 20 m, 25 m, 50 m, 100 m)
+  const targetBarM = (mapW / scale) * 0.24;
+  const barM = [5, 10, 20, 25, 50, 100, 200].reduce((a, b) => (Math.abs(b - targetBarM) < Math.abs(a - targetBarM) ? b : a));
+  const barPx = barM * scale;
+
+  // Dedicated Right-Hand Legend Panel (Zero overlap with any pin!)
+  let legRowsSvg = "";
+  let curY = legY + 34;
+  for (const [ft, count] of typeCounts.entries()) {
+    const spec = PIN_FEATURE_SPECS[ft] || PIN_FEATURE_SPECS.custom;
+    const countTxt = count > 1 ? ` (×${count})` : "";
+    legRowsSvg += `
+      <g transform="translate(${legX + 20}, ${curY}) scale(0.62)">${renderPinGlyphInner(ft)}</g>
+      <text x="${legX + 36}" y="${curY + 3.5}" font-size="8.6" font-weight="700" fill="#0f172a">${esc(spec.label)}${countTxt}</text>
+    `;
+    curY += 24;
+  }
+
+  const ctxStartY = Math.max(curY + 8, legY + legH - 134);
+  const backdropLabel = isAerial ? (options.aerialAttribution || "Aerial Imagery Backdrop") : "Vector GIS / CAD Backdrop";
+  const zoningStr = (spatial?.land_zoning || []).join(", ") || "Verify LEP";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" style="background:#ffffff; font-family:Inter,sans-serif;">
+    <defs>
+      <clipPath id="pinDetailClip"><rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" /></clipPath>
+    </defs>
+
+    <text x="${W / 2}" y="26" text-anchor="middle" font-size="13" font-weight="800" fill="#0d241b">
+      ZOOMED INFRASTRUCTURE &amp; GPS FEATURE PLAN — ${esc(inp.site_address)} (Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)})
+    </text>
+
+    <!-- Map Canvas -->
+    <rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" fill="${isAerial ? "#1a2420" : "#f8fafc"}" stroke="#1e293b" stroke-width="1.4" />
+    <g clip-path="url(#pinDetailClip)">
+      ${isAerial ? `<image href="${esc(options.aerialDataUrl)}" x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" preserveAspectRatio="none" />` : ""}
+      ${gridSvg}
+      ${nbSvg}
+      ${contSvg}
+      ${subjSvg}
+      ${wcBuf100Svg}
+      ${wcBufSvg}
+      ${wcLineSvg}
+      ${footprintsSvg}
+      ${pinsSvg}
+    </g>
+
+    <!-- Scale bar (bottom-left with pill backing for aerial contrast) -->
+    <g transform="translate(${mapX + 12}, ${mapY + mapH - 34})">
+      <rect x="-6" y="-8" width="${(barPx + 24).toFixed(1)}" height="30" rx="5" fill="rgba(255,255,255,0.92)" stroke="#cbd5e1" stroke-width="0.8" />
+      <rect x="0" y="8" width="${(barPx / 2).toFixed(1)}" height="7" fill="#0f172a" stroke="#0f172a" />
+      <rect x="${(barPx / 2).toFixed(1)}" y="8" width="${(barPx / 2).toFixed(1)}" height="7" fill="#ffffff" stroke="#0f172a" />
+      <text x="0" y="4" font-size="8.2" font-weight="700" fill="#0f172a">0</text>
+      <text x="${(barPx / 2).toFixed(1)}" y="4" text-anchor="middle" font-size="8.2" font-weight="700" fill="#0f172a">${barM / 2}</text>
+      <text x="${barPx.toFixed(1)}" y="4" text-anchor="middle" font-size="8.2" font-weight="700" fill="#0f172a">${barM} m</text>
+    </g>
+
+    <!-- Dedicated Right-Hand Legend Panel (Zero Pin Overlap) -->
+    <rect x="${legX}" y="${legY}" width="${legW}" height="${legH}" rx="6" fill="#f8fafc" stroke="#1e293b" stroke-width="1.2" />
+    <rect x="${legX}" y="${legY}" width="${legW}" height="22" rx="5" fill="#143628" />
+    <text x="${legX + legW / 2}" y="${legY + 14.5}" text-anchor="middle" font-size="8.8" font-weight="800" fill="#ffffff">FEATURE LEGEND (${vp.pins.length} PINS)</text>
+
+    ${legRowsSvg}
+
+    <line x1="${legX + 10}" y1="${ctxStartY - 8}" x2="${legX + legW - 10}" y2="${ctxStartY - 8}" stroke="#cbd5e1" stroke-width="1" />
+    <text x="${legX + 10}" y="${ctxStartY + 4}" font-size="7.8" font-weight="800" fill="#143628">MAP LAYERS &amp; ORIENTATION</text>
+    <line x1="${legX + 10}" y1="${ctxStartY + 18}" x2="${legX + 26}" y2="${ctxStartY + 18}" stroke="#991b1b" stroke-width="2" stroke-dasharray="4,2" />
+    <text x="${legX + 32}" y="${ctxStartY + 21}" font-size="7.8" fill="#334155">Lot Boundary</text>
+    ${hasFootprints ? `<rect x="${legX + 10}" y="${ctxStartY + 29}" width="16" height="9" fill="#1d4ed8" fill-opacity="0.22" stroke="#1d4ed8" stroke-width="1.2" />
+    <text x="${legX + 32}" y="${ctxStartY + 37}" font-size="7.8" fill="#334155">Scaled Design Footprint</text>` : ""}
+    <line x1="${legX + 10}" y1="${ctxStartY + 49}" x2="${legX + 26}" y2="${ctxStartY + 49}" stroke="#1d4ed8" stroke-width="2" />
+    <text x="${legX + 32}" y="${ctxStartY + 52}" font-size="7.8" fill="#334155">Watercourse / Buffers</text>
+    <line x1="${legX + 10}" y1="${ctxStartY + 63}" x2="${legX + 26}" y2="${ctxStartY + 63}" stroke="#cbd5e1" stroke-width="1.2" />
+    <text x="${legX + 32}" y="${ctxStartY + 66}" font-size="7.8" fill="#334155">Elevation Contours</text>
+
+    <!-- North Arrow inside Legend -->
+    <g transform="translate(${legX + legW / 2}, ${legY + legH - 42})">
+      <line x1="0" y1="26" x2="0" y2="6" stroke="#0f172a" stroke-width="2.2" />
+      <polygon points="0,-2 -5,9 5,9" fill="#0f172a" />
+      <text x="0" y="-6" text-anchor="middle" font-size="10" font-weight="800" fill="#0f172a">N</text>
+      <text x="0" y="36" text-anchor="middle" font-size="7.0" fill="#475569">Span: ~${Math.round(vp.targetWM)} m × ${Math.round(vp.targetHM)} m</text>
+    </g>
+
+    <!-- Formal Title Block Footer -->
+    <rect x="${mapX}" y="468" width="${W - 48}" height="74" fill="#f7f5ef" stroke="#143628" stroke-width="1.3" />
+    <line x1="${mapX + 286}" y1="468" x2="${mapX + 286}" y2="542" stroke="#143628" stroke-width="0.9" />
+    <line x1="${mapX + 544}" y1="468" x2="${mapX + 544}" y2="542" stroke="#143628" stroke-width="0.9" />
+
+    <text x="${mapX + 10}" y="485" font-size="8.5" font-weight="800" fill="#143628">ZOOMED DETAIL EXTENT</text>
+    <text x="${mapX + 10}" y="502" font-size="8.5" fill="#1e293b">Site: ${esc(inp.site_address)}</text>
+    <text x="${mapX + 10}" y="517" font-size="8.5" fill="#1e293b">Lot/DP: Lot ${esc(inp.lot_number)} ${esc(inp.plan_label)}  |  Zone: ${esc(zoningStr)}</text>
+    <text x="${mapX + 10}" y="532" font-size="8.0" fill="#334155">Pins plotted at exact GDA2020 GPS coordinates (see schedule)</text>
+
+    <text x="${mapX + 296}" y="485" font-size="8.5" font-weight="800" fill="#143628">PROJECTION &amp; BACKDROP</text>
+    <text x="${mapX + 296}" y="502" font-size="8.2" fill="#1e293b">Datum: GDA2020 / MGA Zone 56 (EPSG:7856)</text>
+    <text x="${mapX + 296}" y="517" font-size="8.0" fill="#334155">Window: ~${Math.round(vp.targetWM)} m × ${Math.round(vp.targetHM)} m (Exact GPS)</text>
+    <text x="${mapX + 296}" y="532" font-size="7.6" fill="#475569">${esc(backdropLabel)}</text>
+
+    <text x="${mapX + 554}" y="485" font-size="8.5" font-weight="800" fill="#143628">PREPARED BY</text>
+    <text x="${mapX + 554}" y="502" font-size="8.3" fill="#1e293b">${esc(inp.consultant?.name || "Field To Forest")}</text>
+    <text x="${mapX + 554}" y="517" font-size="8.3" fill="#1e293b">Ref: ${esc(inp.project_ref)}  |  Date: ${esc(inp.site_eval?.assessment_date || "")}</text>
+    <text x="${mapX + 554}" y="532" font-size="8.3" font-weight="800" fill="#991b1b">Drawing: ${esc(drawingCode)}  |  ${esc(submissionLabel)}</text>
   </svg>`;
 }
 
